@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Sand:box Simulation - Расширенная версия</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #333;
+      font-family: sans-serif;
+    }
+    canvas {
+      display: block;
+      background: #000;
+    }
+    /* Панель управления */
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255,255,255,0.9);
+      padding: 10px;
+      border-radius: 5px;
+    }
+    #ui button, #ui input {
+      margin: 4px;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+    #ui label {
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Панель управления -->
+  <div id="ui">
+    <div>
+      <span>Выберите материал:</span>
+      <button data-material="1">Песок</button>
+      <button data-material="2">Вода</button>
+      <button data-material="3">Огонь</button>
+      <button data-material="4">Газ</button>
+      <button data-material="5">Дерево</button>
+      <button data-material="6">Пин</button>
+      <button data-material="7">Лава</button>
+      <button data-material="8">Кислота</button>
+      <button data-material="0">Ластик</button>
+    </div>
+    <div>
+      <button id="clearBtn">Стереть всё</button>
+      <button id="pauseBtn">Пауза</button>
+    </div>
+    <div>
+      <label for="brushSize">Размер кисти: </label>
+      <input type="range" id="brushSize" min="1" max="20" value="4">
+      <span id="brushValue">4</span>
+    </div>
+  </div>
+  <canvas id="canvas"></canvas>
+  <script>
+    // Настройка canvas и размеров сетки
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const cellSize = 4;
+    const gridWidth = Math.floor(canvas.width / cellSize);
+    const gridHeight = Math.floor(canvas.height / cellSize);
+
+    // Обозначения материалов
+    const EMPTY  = 0,
+          SAND   = 1,
+          WATER  = 2,
+          FIRE   = 3,
+          GAS    = 4,
+          WOOD   = 5,
+          PIN    = 6,
+          LAVA   = 7,
+          ACID   = 8;
+
+    // Цвета для отрисовки
+    const colors = {
+      [EMPTY]: '#000',
+      [SAND]: '#deb887',
+      [WATER]: '#1e90ff',
+      [FIRE]: '#ff4500',
+      [GAS]: '#cccccc',
+      [WOOD]: '#8b4513',
+      [PIN]: '#00ff00',
+      [LAVA]: '#ff8c00',   // яркий оранжевый цвет для лавы
+      [ACID]: '#adff2f'    // ярко-зелёный для кислоты
+    };
+
+    // Создаем двумерный массив для симуляции
+    let grid = [];
+    for (let y = 0; y < gridHeight; y++) {
+      grid[y] = [];
+      for (let x = 0; x < gridWidth; x++) {
+        grid[y][x] = EMPTY;
+      }
+    }
+
+    // Выбранный материал (по умолчанию песок)
+    let selectedMaterial = SAND;
+    document.querySelectorAll('#ui button[data-material]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedMaterial = parseInt(btn.getAttribute('data-material'));
+      });
+    });
+
+    // Переменные для кисти
+    const brushSizeSlider = document.getElementById('brushSize');
+    const brushValueDisplay = document.getElementById('brushValue');
+    let brushSize = parseInt(brushSizeSlider.value);
+    brushSizeSlider.addEventListener('input', () => {
+      brushSize = parseInt(brushSizeSlider.value);
+      brushValueDisplay.textContent = brushSize;
+    });
+
+    // Кнопка "Стереть всё"
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      for (let y = 0; y < gridHeight; y++) {
+        for (let x = 0; x < gridWidth; x++) {
+          grid[y][x] = EMPTY;
+        }
+      }
+    });
+
+    // Кнопка "Пауза"
+    let isPaused = false;
+    const pauseBtn = document.getElementById('pauseBtn');
+    pauseBtn.addEventListener('click', () => {
+      isPaused = !isPaused;
+      pauseBtn.textContent = isPaused ? "Продолжить" : "Пауза";
+    });
+
+    // Обработка событий мыши: создание (ЛКМ) и стирание (ПКМ)
+    let isMouseDown = false;
+    canvas.addEventListener('mousedown', e => {
+      isMouseDown = true;
+      handleDrawing(e);
+    });
+    canvas.addEventListener('mousemove', e => {
+      if (isMouseDown) handleDrawing(e);
+    });
+    canvas.addEventListener('mouseup', () => isMouseDown = false);
+    // ПКМ для стирания: предотвращаем стандартное меню браузера
+    canvas.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      selectedMaterial = EMPTY;
+      handleDrawing(e);
+      return false;
+    });
+    function handleDrawing(e) {
+      const rect = canvas.getBoundingClientRect();
+      const centerX = Math.floor((e.clientX - rect.left) / cellSize);
+      const centerY = Math.floor((e.clientY - rect.top) / cellSize);
+      // Рисуем в круге с радиусом brushSize
+      for (let dy = -brushSize; dy <= brushSize; dy++) {
+        for (let dx = -brushSize; dx <= brushSize; dx++) {
+          if (dx*dx + dy*dy <= brushSize*brushSize) {
+            const x = centerX + dx;
+            const y = centerY + dy;
+            if (x >= 0 && x < gridWidth && y >= 0 && y < gridHeight) {
+              grid[y][x] = selectedMaterial;
+            }
+          }
+        }
+      }
+    }
+
+    // Основная функция обновления симуляции
+    function update() {
+      // Обходим клетки снизу вверх, чтобы частицы перемещались корректно
+      for (let y = gridHeight - 1; y >= 0; y--) {
+        for (let x = 0; x < gridWidth; x++) {
+          let cell = grid[y][x];
+          // Песок: падает вниз и по диагонали, заменяя воду
+          if (cell === SAND) {
+            if (y+1 < gridHeight && (grid[y+1][x] === EMPTY || grid[y+1][x] === WATER)) {
+              grid[y+1][x] = SAND;
+              grid[y][x] = (grid[y+1][x] === WATER) ? WATER : EMPTY;
+            } else if (y+1 < gridHeight && x > 0 && (grid[y+1][x-1] === EMPTY || grid[y+1][x-1] === WATER)) {
+              grid[y+1][x-1] = SAND;
+              grid[y][x] = (grid[y+1][x-1] === WATER) ? WATER : EMPTY;
+            } else if (y+1 < gridHeight && x < gridWidth - 1 && (grid[y+1][x+1] === EMPTY || grid[y+1][x+1] === WATER)) {
+              grid[y+1][x+1] = SAND;
+              grid[y][x] = (grid[y+1][x+1] === WATER) ? WATER : EMPTY;
+            }
+          }
+          // Вода: стекает вниз, либо растекается в стороны
+          else if (cell === WATER) {
+            if (y+1 < gridHeight && grid[y+1][x] === EMPTY) {
+              grid[y+1][x] = WATER;
+              grid[y][x] = EMPTY;
+            } else {
+              let dir = Math.random() < 0.5 ? -1 : 1;
+              if (x+dir >= 0 && x+dir < gridWidth && grid[y][x+dir] === EMPTY) {
+                grid[y][x+dir] = WATER;
+                grid[y][x] = EMPTY;
+              }
+            }
+          }
+          // Огонь: затухает, распространяется на горючие материалы и гасится водой
+          else if (cell === FIRE) {
+            if (Math.random() < 0.05) {
+              grid[y][x] = EMPTY;
+            }
+            // Распространение огня на дерево
+            for (let dy = -1; dy <= 1; dy++) {
+              for (let dx = -1; dx <= 1; dx++) {
+                let nx = x + dx, ny = y + dy;
+                if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight) {
+                  if (grid[ny][nx] === WOOD && Math.random() < 0.3) {
+                    grid[ny][nx] = FIRE;
+                  }
+                }
+              }
+            }
+            // Гашение огня водой
+            for (let dy = -1; dy <= 1; dy++) {
+              for (let dx = -1; dx <= 1; dx++) {
+                let nx = x + dx, ny = y + dy;
+                if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight) {
+                  if (grid[ny][nx] === WATER && Math.random() < 0.2) {
+                    grid[y][x] = WATER;
+                  }
+                }
+              }
+            }
+            // Подъем огня вверх
+            if (y-1 >= 0 && grid[y-1][x] === EMPTY && Math.random() < 0.3) {
+              grid[y-1][x] = FIRE;
+              grid[y][x] = EMPTY;
+            }
+          }
+          // Газ: поднимается вверх и растекается в стороны
+          else if (cell === GAS) {
+            if (y-1 >= 0 && grid[y-1][x] === EMPTY) {
+              grid[y-1][x] = GAS;
+              grid[y][x] = EMPTY;
+            } else {
+              let dir = Math.random() < 0.5 ? -1 : 1;
+              if (x+dir >= 0 && x+dir < gridWidth && grid[y][x+dir] === EMPTY) {
+                grid[y][x+dir] = GAS;
+                grid[y][x] = EMPTY;
+              }
+            }
+          }
+          // Лава: течёт подобно воде, но реагирует с водой и горючими материалами
+          else if (cell === LAVA) {
+            // Если ниже пусто, движемся вниз
+            if (y+1 < gridHeight && grid[y+1][x] === EMPTY) {
+              grid[y+1][x] = LAVA;
+              grid[y][x] = EMPTY;
+            }
+            // Реакция с водой: оба превращаются в газ (испарение)
+            else if (y+1 < gridHeight && grid[y+1][x] === WATER) {
+              grid[y+1][x] = GAS;
+              grid[y][x] = GAS;
+            }
+            else {
+              // Распространение в стороны
+              let dir = Math.random() < 0.5 ? -1 : 1;
+              if (x+dir >= 0 && x+dir < gridWidth && grid[y][x+dir] === EMPTY) {
+                grid[y][x+dir] = LAVA;
+                grid[y][x] = EMPTY;
+              }
+              // Если рядом дерево – зажигаем его
+              if (x+dir >= 0 && x+dir < gridWidth && grid[y][x+dir] === WOOD && Math.random() < 0.3) {
+                grid[y][x+dir] = FIRE;
+              }
+            }
+          }
+          // Кислота: течёт подобно воде, растворяя горючие материалы (например, дерево)
+          else if (cell === ACID) {
+            if (y+1 < gridHeight && (grid[y+1][x] === EMPTY || grid[y+1][x] === WOOD)) {
+              grid[y+1][x] = ACID;
+              grid[y][x] = EMPTY;
+            } else {
+              let dir = Math.random() < 0.5 ? -1 : 1;
+              if (x+dir >= 0 && x+dir < gridWidth && (grid[y][x+dir] === EMPTY || grid[y][x+dir] === WOOD)) {
+                grid[y][x+dir] = ACID;
+                grid[y][x] = EMPTY;
+              }
+            }
+          }
+          // Пины: остаются на месте, периодически испуская огонь
+          else if (cell === PIN) {
+            if (Math.random() < 0.02 && y-1 >= 0 && grid[y-1][x] === EMPTY) {
+              grid[y-1][x] = FIRE;
+            }
+          }
+          // Дерево остаётся статичным, но может воспламеняться
+        }
+      }
+    }
+
+    // Отрисовка сетки
+    function draw() {
+      for (let y = 0; y < gridHeight; y++) {
+        for (let x = 0; x < gridWidth; x++) {
+          ctx.fillStyle = colors[ grid[y][x] ];
+          ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+        }
+      }
+    }
+
+    // Главный цикл симуляции
+    function loop() {
+      if (!isPaused) update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>
