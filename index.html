@@ -1,492 +1,356 @@
-<!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>Sand:box Simulation – Расширенная версия 2.0</title>
+  <title>Falling Sand Game</title>
   <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background: #333;
-      font-family: sans-serif;
-    }
+    /* Some basic styling for the canvas element and the buttons */
     canvas {
-      display: block;
-      background: #000;
+      background-color: black;
+      user-select: none;
     }
-    /* Панель управления */
-    #ui {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: rgba(255,255,255,0.97);
-      padding: 10px;
-      border-radius: 5px;
-      z-index: 10;
-    }
-    #ui button, #ui input, #ui label {
-      margin: 4px;
-      padding: 4px 8px;
+    .button {
+      display: inline-block;
+      border: none;
+      padding: 5px 10px;
+      font-size: 16px;
       cursor: pointer;
-      font-size: 14px;
+      text-align: center;
+      text-decoration: none;
+      outline: none;
+      color: white;
+      background-color: blue;
+      border-radius: 5px;
     }
-    #ui .filter-group {
-      margin-top: 10px;
-      border-top: 1px solid #ccc;
-      padding-top: 8px;
+    .controls {
+      padding: 5px;
+    }
+    .button:hover {
+      background-color: #555;
     }
   </style>
 </head>
 <body>
-  <!-- Панель управления -->
-  <div id="ui">
-    <div>
-      <span>Выберите материал:</span>
-      <button data-material="1">Песок</button>
-      <button data-material="2">Вода</button>
-      <button data-material="3">Огонь</button>
-      <button data-material="4">Газ</button>
-      <button data-material="5">Дерево</button>
-      <button data-material="6">Пин</button>
-      <button data-material="7">Лава</button>
-      <button data-material="8">Кислота</button>
-      <button data-material="9">Электричество</button>
-      <button data-material="10">Свет</button>
-      <button data-material="11">Радиация</button>
-      <button data-material="12">Металл</button>
-      <button data-material="0">Ластик</button>
+  <canvas id="canvas" width="560" height="280"></canvas>
+  <div class="controls">
+    <div class="controls__buttons">
+      <button class="button" id="startButton" style="background-color: black;">Start</button>
+      <button class="button" id="stepButton" style="background-color: black;">Step</button>
+      <button class="button" id="stopButton" style="background-color: black;">Stop</button>
     </div>
-    <div>
-      <button id="clearBtn">Стереть всё</button>
-      <button id="pauseBtn">Пауза</button>
-    </div>
-    <div>
-      <label for="brushSize">Размер кисти:</label>
-      <input type="range" id="brushSize" min="1" max="20" value="4">
-      <span id="brushValue">4</span>
-    </div>
-    <!-- Переключатели фильтров -->
-    <div class="filter-group">
-      <div>Фильтры виденья:</div>
-      <label><input type="checkbox" id="filterTemp"> Температура</label>
-      <label><input type="checkbox" id="filterHum"> Влажность</label>
-      <label><input type="checkbox" id="filterRad"> Радиация</label>
-      <label><input type="checkbox" id="filterElec"> Электричество</label>
+    <div class="controls__brush-width">
+      <span>Brush Width: </span>
+      <input type="range" id="brushWidthSlider" min="1" max="20" step="1">
+      <span id="brushWidthValue"></span>
     </div>
   </div>
-  <canvas id="canvas"></canvas>
+  <div id="info">
+    <span></span>
+  </div>
   <script>
-    // Настройка canvas и размеров сетки
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    const cellSize = 4;
-    const gridWidth = Math.floor(canvas.width / cellSize);
-    const gridHeight = Math.floor(canvas.height / cellSize);
-
-    // Обозначения материалов:
-    // 0 – пусто, 1 – песок, 2 – вода, 3 – огонь, 4 – газ, 5 – дерево,
-    // 6 – пин, 7 – лава, 8 – кислота, 9 – электричество, 10 – свет, 11 – радиация, 12 – металл
-    const EMPTY          = 0,
-          SAND           = 1,
-          WATER          = 2,
-          FIRE           = 3,
-          GAS            = 4,
-          WOOD           = 5,
-          PIN            = 6,
-          LAVA           = 7,
-          ACID           = 8,
-          ELECTRICITY    = 9,
-          LIGHT_MAT      = 10,
-          RADIATION      = 11,
-          METAL          = 12;
-
-    // Цветовая палитра для материалов
-    const colors = {
-      [EMPTY]: '#000',
-      [SAND]: '#deb887',
-      [WATER]: '#1e90ff',
-      [FIRE]: '#ff4500',
-      [GAS]: '#cccccc',
-      [WOOD]: '#8b4513',
-      [PIN]: '#00ff00',
-      [LAVA]: '#ff8c00',
-      [ACID]: '#adff2f',
-      [ELECTRICITY]: '#ffff00',
-      [LIGHT_MAT]: '#ffffff',
-      [RADIATION]: '#9400d3',
-      [METAL]: '#b0b0b0'
-    };
-
-    // Основные физико-химические параметры для каждой ячейки
-    let gridMat = [];
-    let gridTemp = [];     // температура (°C)
-    let gridHumidity = []; // влажность (%)
-    let gridLight = [];    // интенсивность света (0–100)
-    let gridRad = [];      // уровень радиации (0–100)
-    let gridElec = [];     // уровень электричества (0–100)
-
-    // Инициализация массивов
-    for (let y = 0; y < gridHeight; y++) {
-      gridMat[y] = [];
-      gridTemp[y] = [];
-      gridHumidity[y] = [];
-      gridLight[y] = [];
-      gridRad[y] = [];
-      gridElec[y] = [];
-      for (let x = 0; x < gridWidth; x++) {
-        gridMat[y][x] = EMPTY;
-        gridTemp[y][x] = 20;       // базовая температура
-        gridHumidity[y][x] = 50;   // базовая влажность
-        gridLight[y][x] = 0;
-        gridRad[y][x] = 0;
-        gridElec[y][x] = 0;
+    const info = document.querySelector('#info>span');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const cellSize = 2; // Set the size of each cell in the grid
+let updateFrequency = 60; // In ticks per second
+let interval;
+let brushWidth = 4;
+let tick = 0;
+const activeParticles = new Map();
+const gridWidth = canvas.width / cellSize;
+const gridHeight = canvas.height / cellSize;
+// Create the grid array to store the state of each cell
+let grid = [];
+function resetGrid() {
+  for (let x = 0; x < gridWidth; x++) {
+    grid[x] = [];
+  }
+}
+resetGrid();
+function loadTexture(url) {
+  const canvas = document.createElement('canvas');
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+  const img = new Image();
+  let data, w, h;
+  img.src = url;
+  img.addEventListener('load', () => {
+    w = img.width;
+    h = img.height;
+    canvas.width = w;
+    canvas.height = h;
+    ctx.drawImage(img, 0, 0);
+    data = ctx.getImageData(0, 0, w, h).data;
+  });
+  return {
+    getPixel(x, y) {
+      const r = data[(w * y + x) * 4], g = data[(w * y + x) * 4 + 1], b = data[(w * y + x) * 4 + 2];
+      return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
+  }
+}
+const t = loadTexture('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAMAAAADCAYAAABWKLW/AAABhWlDQ1BJQ0MgcHJvZmlsZQAAKJF9kT1Iw\
+0AcxV9TtaIVBTuIOGSoThakijhKFYtgobQVWnUwufRDaNKQpLg4Cq4FBz8Wqw4uzro6uAqC4AeIo5OToouU+L+k0CLGg+N+vLv3uHsHCPUyU82OCUDVLCMVj4nZ3Io\
+YeEUQA+hFFF0SM/VEeiEDz/F1Dx9f7yI8y/vcn6NPyZsM8InEs0w3LOJ14ulNS+e8TxxiJUkhPiceN+iCxI9cl11+41x0WOCZISOTmiMOEYvFNpbbmJUMlXiKOKyoG\
+uULWZcVzluc1XKVNe/JXxjMa8tprtMcQRyLSCAJETKq2EAZFiK0aqSYSNF+zMM/7PiT5JLJtQFGjnlUoEJy/OB/8LtbszAZdZOCMaDzxbY/RoHALtCo2fb3sW03TgD\
+/M3CltfyVOjDzSXqtpYWPgP5t4OK6pcl7wOUOMPSkS4bkSH6aQqEAvJ/RN+WAwVugZ9XtrbmP0wcgQ10t3QAHh8BYkbLXPN7d3d7bv2ea/f0AfPFyqxtlO4sAAAAJc\
+EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd2l0aCBHSU1QV4EOFwAAADBJREFUCNdj3LMi5z8jExvDv78\
+/GJiY2PgZfn6+y8DIxMbAxPD/L4OAYijD72/PGAAY5Q4TcxcJ4wAAAABJRU5ErkJggg==');
+function getDistance(p1, p2) {
+  return Math.hypot(p2.x - p1.x, p2.y - p1.y);
+}
+function getDistance2(p1, p2) {
+  return (p2.x - p1.x)**2 + (p2.y - p1.y)**2;
+}
+function findNearest(a, b, p) {
+  let atob = { x: b.x - a.x, y: b.y - a.y };
+  let atop = { x: p.x - a.x, y: p.y - a.y };
+  let len = atob.x * atob.x + atob.y * atob.y;
+  if(len === 0) {
+    return a;
+  }
+  let dot = atop.x * atob.x + atop.y * atob.y;
+  let t = Math.min(1, Math.max(0, dot / len));
+  return { x: a.x + atob.x * t, y: a.y + atob.y * t };
+}
+function drawLine(x1, y1, x2, y2, radius, setPixel) {
+  const minX = Math.min(x1, x2) - radius;
+  const minY = Math.min(y1, y2) - radius;
+  const maxX = Math.max(x1, x2) + radius;
+  const maxY = Math.max(y1, y2) + radius;
+  for(let x = minX; x <= maxX; x++) {
+    for(let y = minY; y <= maxY; y++) {
+      const nearest = findNearest({ x: x1, y: y1 }, { x: x2, y: y2 }, { x, y });
+      const distance2 = getDistance2(nearest, { x, y });
+      if(distance2 < radius**2) {
+        setPixel(x, y);
       }
     }
-
-    // Выбранный материал (по умолчанию песок)
-    let selectedMaterial = SAND;
-    document.querySelectorAll('#ui button[data-material]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        selectedMaterial = parseInt(btn.getAttribute('data-material'));
-      });
-    });
-
-    // Переменные для кисти
-    const brushSizeSlider = document.getElementById('brushSize');
-    const brushValueDisplay = document.getElementById('brushValue');
-    let brushSize = parseInt(brushSizeSlider.value);
-    brushSizeSlider.addEventListener('input', () => {
-      brushSize = parseInt(brushSizeSlider.value);
-      brushValueDisplay.textContent = brushSize;
-    });
-
-    // Фильтры виденья
-    let showTemp = document.getElementById('filterTemp').checked;
-    let showHum = document.getElementById('filterHum').checked;
-    let showRad = document.getElementById('filterRad').checked;
-    let showElec = document.getElementById('filterElec').checked;
-    document.getElementById('filterTemp').addEventListener('change', e => showTemp = e.target.checked);
-    document.getElementById('filterHum').addEventListener('change', e => showHum = e.target.checked);
-    document.getElementById('filterRad').addEventListener('change', e => showRad = e.target.checked);
-    document.getElementById('filterElec').addEventListener('change', e => showElec = e.target.checked);
-
-    // Кнопка "Стереть всё"
-    document.getElementById('clearBtn').addEventListener('click', () => {
-      for (let y = 0; y < gridHeight; y++) {
-        for (let x = 0; x < gridWidth; x++) {
-          gridMat[y][x] = EMPTY;
-          gridTemp[y][x] = 20;
-          gridHumidity[y][x] = 50;
-          gridLight[y][x] = 0;
-          gridRad[y][x] = 0;
-          gridElec[y][x] = 0;
-        }
-      }
-    });
-
-    // Кнопка "Пауза"
-    let isPaused = false;
-    const pauseBtn = document.getElementById('pauseBtn');
-    pauseBtn.addEventListener('click', () => {
-      isPaused = !isPaused;
-      pauseBtn.textContent = isPaused ? "Продолжить" : "Пауза";
-    });
-
-    // Обработка событий мыши: создание (ЛКМ) и стирание (ПКМ)
-    let isMouseDown = false;
-    canvas.addEventListener('mousedown', e => {
-      isMouseDown = true;
-      handleDrawing(e);
-    });
-    canvas.addEventListener('mousemove', e => {
-      if (isMouseDown) handleDrawing(e);
-    });
-    canvas.addEventListener('mouseup', () => isMouseDown = false);
-    canvas.addEventListener('contextmenu', e => {
-      e.preventDefault();
-      selectedMaterial = EMPTY;
-      handleDrawing(e);
-      return false;
-    });
-    function handleDrawing(e) {
-      const rect = canvas.getBoundingClientRect();
-      const centerX = Math.floor((e.clientX - rect.left) / cellSize);
-      const centerY = Math.floor((e.clientY - rect.top) / cellSize);
-      for (let dy = -brushSize; dy <= brushSize; dy++) {
-        for (let dx = -brushSize; dx <= brushSize; dx++) {
-          if (dx * dx + dy * dy <= brushSize * brushSize) {
-            const x = centerX + dx;
-            const y = centerY + dy;
-            if (x >= 0 && x < gridWidth && y >= 0 && y < gridHeight) {
-              gridMat[y][x] = selectedMaterial;
-              // При создании новых материалов задаём базовые параметры
-              if (selectedMaterial === FIRE) gridTemp[y][x] = 200;
-              if (selectedMaterial === LIGHT_MAT) gridLight[y][x] = 100;
-              if (selectedMaterial === RADIATION) gridRad[y][x] = 100;
-              if (selectedMaterial === ELECTRICITY) gridElec[y][x] = 100;
-            }
-          }
-        }
+  }
+}
+function randi(min, max) {
+  return min + Math.round(Math.random() * (max - min));
+}
+function setPixel(x, y, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+}
+class Particle {
+  constructor(x, y, grid) {
+    this._x = x;
+    this._y = y;
+    this._prevX = x;
+    this._prevY = y;
+    this._grid = grid;
+    this._lastUpdateTick = 0;
+    this._awake = false;
+    this.wake();
+  }
+  savePosition() {
+    this._prevX = this._x;
+    this._prevY = this._y;
+  }
+  update() {
+    if(this._lastUpdateTick === tick || !this._awake) return;
+    this._lastUpdateTick = tick;
+    this.savePosition();
+    const hasMoved = this._update();
+    if(hasMoved) {
+      this.wake();
+    } else {
+      this.sleep();
+    }
+    this.render();
+  }
+  render() {}
+  wake() {
+    if(!this._awake) {
+      this._awake = true;
+      activeParticles.set(this, this);
+    }
+  }
+  sleep() {
+    if(this._awake) {
+      this._awake = false;
+      activeParticles.delete(this);
+    }
+  }
+  canMove(dx, dy) {
+    const newX = this._x + dx;
+    const newY = this._y + dy;
+    return newX >= 0 && 
+      newX < gridWidth && 
+      newY >= 0 && 
+      newY < gridHeight && 
+      !this._grid[newX][newY] &&
+      (this._grid[newX][newY] === null || !this._grid[newX][newY]);
+  }
+  moveIfCan(dx, dy) {
+    getParticle(this._x + dx, this._y + dy)?.update();
+    if(this.canMove(dx, dy)) {
+      this._grid[this._x][this._y] = null;
+      setPixel(this._x, this._y, 'black');
+      wakeNeighbors(this._x, this._y);
+      this._x += dx;
+      this._y += dy;
+      placeParticle(this._x, this._y, this);
+      return { x: this._x, y: this._y };
+    }
+    return false;
+  }
+  toString() { return `${this._x}_${this._y}` }
+}
+function defineParticleType(name, buttonColor, particleColor, updateFn) {
+  const newParticleClass = class extends Particle {
+    constructor(x, y, grid) {
+      super(x, y, grid);
+      if(typeof particleColor == 'function') {
+        this._color = particleColor(x, y);
+      } else {
+        this._color = particleColor;
       }
     }
+    _update = updateFn;
+    render() {
+      setPixel(this._prevX, this._prevY, 'black');
+      setPixel(this._x, this._y, this._color);
+    }
+  };
+  const button = document.createElement('button');
+  button.classList.add('button');
+  button.style.backgroundColor = buttonColor;
+  button.innerText = name;
+  button.addEventListener('click', () => currentMaterial = newParticleClass);
+  document.querySelector('.controls__buttons').appendChild(button);
+  return newParticleClass;
+}
+const SandParticle = defineParticleType('Sand', 'yellow', (x, y) => t.getPixel(randi(0, 2), randi(0, 2)), function() {
+  if(!this.moveIfCan(0, 1)) {
+    const leftOrRight = randi(0, 1);
+    if(leftOrRight === 0) {
+      return this.moveIfCan(-1, 1) || this.moveIfCan(1, 1);
+    } else {
+      return this.moveIfCan(1, 1) || this.moveIfCan(-1, 1);
+    }
+  }
+  return true;
+});
+// Particle definitions
+const WaterParticle = defineParticleType('Water', 'blue', 'blue', function() {
+  if(!(this.moveIfCan(0, 1) ||
+    this.moveIfCan(randi(-1, -2), 1) ||
+    this.moveIfCan(randi(1, 2), 1) ||
+    this.moveIfCan(1, 0))) {
+    return Math.random() <= 0.5 ? this.moveIfCan(randi(-1, -2), 0) : this.moveIfCan(randi(1, 2), 0);
+  }
+  return true;
+});
+const GasParticle = defineParticleType('Gas', 'green', 'green', function() {
+  if(!(this.moveIfCan(0, -1) || this.moveIfCan(-1, -1) || this.moveIfCan(1, -1))) {
+    if(Math.random() < 0.2) {
+      Math.random() <= 0.5 ? this.moveIfCan(-1, 0) : this.moveIfCan(1, 0);
+    }
+  }
+  return true;
+});
+const SolidParticle = defineParticleType('Solid', 'grey', 'grey', function() {
+  return false;
+});
+let currentMaterial = SandParticle;
+let isMouseDown = false;
+const mouse = {
+  isDown: false,
+  button: 0,
+  prevX: 0, prevY: 0,
+  x: 0, y: 0,
+}
+canvas.addEventListener('mousedown', event => {
+  mouse.isDown = true;
+  mouse.button = event.button;
+  // Calculate the x and y coordinates of the click relative to the canvas
+  mouse.prevX = mouse.x;
+  mouse.prevY = mouse.y;
+  mouse.x = Math.floor(event.offsetX / cellSize);
+  mouse.y = Math.floor(event.offsetY / cellSize);
+  // Update the particles if game is not running
+  if(!interval) {
+    tick++;
+    getParticle(mouse.x, mouse.y)?.update();
+  }
+});
+canvas.addEventListener('mousemove', event => {
+  mouse.x = Math.floor(event.offsetX / cellSize);
+  mouse.y = Math.floor(event.offsetY / cellSize);
+});
+canvas.addEventListener('mouseup', () => mouse.isDown = false);
+canvas.addEventListener("contextmenu", e => e.preventDefault());
+document.getElementById('startButton').addEventListener('click', () => { if(!interval) { interval = setInterval(gameLoop, 1000 / updateFrequency); }});
+document.getElementById('stepButton').addEventListener('click', gameLoop);
+document.getElementById('stopButton').addEventListener('click', () => { if(interval) { clearInterval(interval); interval = null; }});
+const brushWidthValue = document.getElementById('brushWidthValue');
+document.getElementById('brushWidthSlider').value = brushWidth;
+brushWidthValue.innerText = brushWidth;
+document.getElementById('brushWidthSlider').addEventListener('input', e => {
+  brushWidth = parseInt(e.target.value);
+  brushWidthValue.innerText = brushWidth;
+});
+function getParticle(x, y) {
+  if(x >= 0 && x < gridWidth && y >= 0 && y < gridHeight) {
+    return grid[x][y];
+  }
+}
+function placeParticle(x, y, particle) {
+  if(x >= 0 && x < gridWidth) {
+    if(y >= 0 && y < gridHeight) {
+      if(!getParticle(x, y)) {
+        grid[x][y] = particle || new currentMaterial(x, y, grid);
+        grid[x][y].wake();
+      }
+    }
+  }
+}
+function removeParticle(x, y) {
+  if(x >= 0 && x < gridWidth) {
+    if(y >= 0 && y < gridHeight) {
+      const particle = grid[x][y];
+      activeParticles.delete(particle);
+      setPixel(x, y, 'black');
+      grid[x][y] = null;
+      wakeNeighbors(x, y);
+    }
+  }
+}
+function wakeNeighbors(cx, cy) {
+  for(let x = cx-1; x <= cx+1; x++) {
+    for(let y = cy-1; y <= cy+1; y++) {
+      const particle = getParticle(x, y);
+      if(particle) {
+        particle.wake();
+      }
+    }
+  }
+}
+// Define the update function
+function update() {
+  tick++;
+  if(mouse.isDown) {
+  // if(mouse.isDown && activeParticles.size == 0) {
+    drawLine(mouse.prevX, mouse.prevY, mouse.x, mouse.y, brushWidth, mouse.button == 0 ? placeParticle : removeParticle);
+    mouse.prevX = mouse.x;
+    mouse.prevY = mouse.y;
+  }
+  let count = 0;
+  activeParticles.forEach(particle => {
+    count++;
+    particle.update();
+  });
+  info.innerHTML = `Active particles: ${count}`;
+}
 
-    // Функция для диффузии параметров (температуры, влажности, света, радиации, электричества)
-    function diffuseProperties() {
-      let newTemp = gridTemp.map(row => row.slice());
-      let newHum = gridHumidity.map(row => row.slice());
-      let newLight = gridLight.map(row => row.slice());
-      let newRad = gridRad.map(row => row.slice());
-      let newElec = gridElec.map(row => row.slice());
-      for (let y = 0; y < gridHeight; y++) {
-        for (let x = 0; x < gridWidth; x++) {
-          let count = 0, sumTemp = 0, sumHum = 0, sumLight = 0, sumRad = 0, sumElec = 0;
-          const dirs = [[0,1],[1,0],[-1,0],[0,-1]];
-          for (let [dx, dy] of dirs) {
-            let nx = x + dx, ny = y + dy;
-            if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight) {
-              sumTemp += gridTemp[ny][nx];
-              sumHum += gridHumidity[ny][nx];
-              sumLight += gridLight[ny][nx];
-              sumRad += gridRad[ny][nx];
-              sumElec += gridElec[ny][nx];
-              count++;
-            }
-          }
-          newTemp[y][x] = (gridTemp[y][x] + sumTemp) / (count + 1);
-          newHum[y][x] = (gridHumidity[y][x] + sumHum) / (count + 1);
-          newLight[y][x] = (gridLight[y][x] + sumLight) / (count + 1) * 0.98;
-          newRad[y][x] = (gridRad[y][x] + sumRad) / (count + 1) * 0.98;
-          newElec[y][x] = (gridElec[y][x] + sumElec) / (count + 1) * 0.95; // электричество затухает медленнее через металл/воду
-        }
-      }
-      gridTemp = newTemp;
-      gridHumidity = newHum;
-      gridLight = newLight;
-      gridRad = newRad;
-      gridElec = newElec;
-    }
+// Set up the game loop to update and render the game on each frame
+function gameLoop() {
+  update();
+}
 
-    // Вспомогательные функции для обновления соседей
-    function adjacentCellHas(y, x, material) {
-      const dirs = [[0,1],[1,0],[-1,0],[0,-1]];
-      for (let [dx, dy] of dirs) {
-        let nx = x + dx, ny = y + dy;
-        if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight) {
-          if (gridMat[ny][nx] === material) return true;
-        }
-      }
-      return false;
-    }
-    function increaseNeighborTemp(x, y, amount) {
-      const dirs = [[0,1],[1,0],[-1,0],[0,-1]];
-      for (let [dx, dy] of dirs) {
-        let nx = x + dx, ny = y + dy;
-        if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight) {
-          gridTemp[ny][nx] += amount;
-        }
-      }
-    }
-
-    // Основная функция обновления симуляции
-    function update() {
-      for (let y = gridHeight - 1; y >= 0; y--) {
-        for (let x = 0; x < gridWidth; x++) {
-          let cell = gridMat[y][x];
-          if (cell === SAND) {
-            if (y+1 < gridHeight && (gridMat[y+1][x] === EMPTY || gridMat[y+1][x] === WATER)) {
-              gridMat[y+1][x] = SAND;
-              gridMat[y][x] = (gridMat[y+1][x] === WATER) ? WATER : EMPTY;
-            } else if (y+1 < gridHeight && x > 0 && (gridMat[y+1][x-1] === EMPTY || gridMat[y+1][x-1] === WATER)) {
-              gridMat[y+1][x-1] = SAND;
-              gridMat[y][x] = (gridMat[y+1][x-1] === WATER) ? WATER : EMPTY;
-            } else if (y+1 < gridHeight && x < gridWidth - 1 && (gridMat[y+1][x+1] === EMPTY || gridMat[y+1][x+1] === WATER)) {
-              gridMat[y+1][x+1] = SAND;
-              gridMat[y][x] = (gridMat[y+1][x+1] === WATER) ? WATER : EMPTY;
-            }
-          }
-          else if (cell === WATER) {
-            if (y+1 < gridHeight && gridMat[y+1][x] === EMPTY) {
-              gridMat[y+1][x] = WATER;
-              gridMat[y][x] = EMPTY;
-            } else {
-              let dir = Math.random() < 0.5 ? -1 : 1;
-              if (x+dir >= 0 && x+dir < gridWidth && gridMat[y][x+dir] === EMPTY) {
-                gridMat[y][x+dir] = WATER;
-                gridMat[y][x] = EMPTY;
-              }
-            }
-            gridTemp[y][x] = Math.max(gridTemp[y][x] - 0.2, 10);
-            gridHumidity[y][x] = Math.min(gridHumidity[y][x] + 0.5, 100);
-          }
-          else if (cell === FIRE) {
-            if (Math.random() < 0.05) gridMat[y][x] = EMPTY;
-            for (let dy = -1; dy <= 1; dy++) {
-              for (let dx = -1; dx <= 1; dx++) {
-                let nx = x+dx, ny = y+dy;
-                if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight) {
-                  if (gridMat[ny][nx] === WOOD && Math.random() < 0.3)
-                    gridMat[ny][nx] = FIRE;
-                }
-              }
-            }
-            for (let dy = -1; dy <= 1; dy++) {
-              for (let dx = -1; dx <= 1; dx++) {
-                let nx = x+dx, ny = y+dy;
-                if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight) {
-                  if (gridMat[ny][nx] === WATER && Math.random() < 0.2)
-                    gridMat[y][x] = WATER;
-                }
-              }
-            }
-            if (y-1 >= 0 && gridMat[y-1][x] === EMPTY && Math.random() < 0.3) {
-              gridMat[y-1][x] = FIRE;
-              gridMat[y][x] = EMPTY;
-            }
-            gridTemp[y][x] = 200;
-          }
-          else if (cell === GAS) {
-            if (y-1 >= 0 && gridMat[y-1][x] === EMPTY) {
-              gridMat[y-1][x] = GAS;
-              gridMat[y][x] = EMPTY;
-            } else {
-              let dir = Math.random() < 0.5 ? -1 : 1;
-              if (x+dir >= 0 && x+dir < gridWidth && gridMat[y][x+dir] === EMPTY) {
-                gridMat[y][x+dir] = GAS;
-                gridMat[y][x] = EMPTY;
-              }
-            }
-          }
-          else if (cell === WOOD) {
-            if (gridTemp[y][x] > 150 || adjacentCellHas(y,x,FIRE))
-              gridMat[y][x] = FIRE;
-          }
-          else if (cell === PIN) {
-            if (Math.random() < 0.02 && y-1 >= 0 && gridMat[y-1][x] === EMPTY)
-              gridMat[y-1][x] = FIRE;
-          }
-          else if (cell === LAVA) {
-            if (y+1 < gridHeight && gridMat[y+1][x] === EMPTY) {
-              gridMat[y+1][x] = LAVA;
-              gridMat[y][x] = EMPTY;
-            }
-            else if (y+1 < gridHeight && gridMat[y+1][x] === WATER) {
-              gridMat[y+1][x] = GAS;
-              gridMat[y][x] = GAS;
-            }
-            else {
-              let dir = Math.random() < 0.5 ? -1 : 1;
-              if (x+dir >= 0 && x+dir < gridWidth && gridMat[y][x+dir] === EMPTY) {
-                gridMat[y][x+dir] = LAVA;
-                gridMat[y][x] = EMPTY;
-              }
-              if (x+dir >= 0 && x+dir < gridWidth && gridMat[y][x+dir] === WOOD && Math.random() < 0.3)
-                gridMat[y][x+dir] = FIRE;
-            }
-            gridTemp[y][x] = 250;
-          }
-          else if (cell === ACID) {
-            if (y+1 < gridHeight && (gridMat[y+1][x] === EMPTY || gridMat[y+1][x] === WOOD)) {
-              gridMat[y+1][x] = ACID;
-              gridMat[y][x] = EMPTY;
-            } else {
-              let dir = Math.random() < 0.5 ? -1 : 1;
-              if (x+dir >= 0 && x+dir < gridWidth && (gridMat[y][x+dir] === EMPTY || gridMat[y][x+dir] === WOOD)) {
-                gridMat[y][x+dir] = ACID;
-                gridMat[y][x] = EMPTY;
-              }
-            }
-          }
-          else if (cell === ELECTRICITY) {
-            // Распространение электричества. Если рядом металл или вода — затухание меньше.
-            if (y+1 < gridHeight && gridMat[y+1][x] === EMPTY) {
-              gridMat[y+1][x] = ELECTRICITY;
-              gridMat[y][x] = EMPTY;
-            } else {
-              let dir = Math.random() < 0.5 ? -1 : 1;
-              if (x+dir >= 0 && x+dir < gridWidth && gridMat[y][x+dir] === EMPTY) {
-                gridMat[y][x+dir] = ELECTRICITY;
-                gridMat[y][x] = EMPTY;
-              }
-            }
-            // Если рядом металл или вода, проводимость выше (электричество затухает меньше)
-            const conductionMaterials = [WATER, METAL];
-            for (let [dx, dy] of [[0,1],[1,0],[-1,0],[0,-1]]) {
-              let nx = x+dx, ny = y+dy;
-              if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight &&
-                  conductionMaterials.includes(gridMat[ny][nx])) {
-                gridElec[ny][nx] = Math.min(gridElec[ny][nx] + 30, 100);
-              }
-            }
-            increaseNeighborTemp(x,y,15);
-          }
-          else if (cell === LIGHT_MAT) {
-            gridLight[y][x] = 100;
-          }
-          else if (cell === RADIATION) {
-            if (Math.random() < 0.01 && adjacentCellHas(y,x,WOOD))
-              gridMat[y][x] = ACID;
-            gridRad[y][x] = 100;
-          }
-          else if (cell === METAL) {
-            // Металл остаётся статичным, но проводит электричество
-            // Если рядом есть электричество, металл «заряжается»
-            if (adjacentCellHas(y, x, ELECTRICITY))
-              gridElec[y][x] = Math.min(gridElec[y][x] + 20, 100);
-          }
-        }
-      }
-      diffuseProperties();
-    }
-
-    // Функция отрисовки ячеек и наложения фильтров
-    function draw() {
-      for (let y = 0; y < gridHeight; y++) {
-        for (let x = 0; x < gridWidth; x++) {
-          ctx.fillStyle = colors[ gridMat[y][x] ];
-          ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-        }
-      }
-      // Оверлеи фильтров
-      for (let y = 0; y < gridHeight; y++) {
-        for (let x = 0; x < gridWidth; x++) {
-          let posX = x * cellSize, posY = y * cellSize;
-          if (showTemp) {
-            // Чем выше температура, тем ярче красный (низкая — синий)
-            let t = Math.max(Math.min((gridTemp[y][x]-20)/200, 1), 0);
-            ctx.fillStyle = `rgba(${Math.floor(255*t)},0,${Math.floor(255*(1-t))},0.3)`;
-            ctx.fillRect(posX, posY, cellSize, cellSize);
-          }
-          if (showHum) {
-            // Влажность: прозрачный синий оверлей, чем выше влажность, тем насыщеннее
-            let h = gridHumidity[y][x] / 100;
-            ctx.fillStyle = `rgba(0,0,255,${0.3*h})`;
-            ctx.fillRect(posX, posY, cellSize, cellSize);
-          }
-          if (showRad) {
-            // Радиация: фиолетовый оверлей
-            let r = gridRad[y][x] / 100;
-            ctx.fillStyle = `rgba(148,0,211,${0.3*r})`;
-            ctx.fillRect(posX, posY, cellSize, cellSize);
-          }
-          if (showElec) {
-            // Электричество: желтый оверлей
-            let e = gridElec[y][x] / 100;
-            ctx.fillStyle = `rgba(255,255,0,${0.3*e})`;
-            ctx.fillRect(posX, posY, cellSize, cellSize);
-          }
-        }
-      }
-    }
-
-    // Главный цикл симуляции
-    function loop() {
-      if (!isPaused) update();
-      draw();
-      requestAnimationFrame(loop);
-    }
-    loop();
+interval = setInterval(gameLoop, 1000 / updateFrequency);
   </script>
 </body>
 </html>
