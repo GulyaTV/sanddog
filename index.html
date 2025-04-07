@@ -430,45 +430,124 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
       return false;
     });
     GOLParticle.prototype.density = 10;
-    
-    // Добавляем новый тип частиц: Лава
-const LavaParticle = defineParticleType('Lava', '#ff8c00', '#ff8c00', function() {
-  // Лава ведёт себя как жидкость, но с большей вязкостью.
-  // Сначала пытаемся двигаться вниз.
-  if (!this.moveIfCan(0, 1)) {
-    // Если вниз занято, пробуем переместиться вбок.
-    let dir = randi(0, 1) === 0 ? -1 : 1;
-    if (!this.moveIfCan(dir, 0)) {
-      // Если в выбранном направлении уже находится вода, заменяем воду дымом (парообразование)
-      let neighbor = getParticle(this._x + dir, this._y);
-      if (neighbor && neighbor._type === 'Water') {
-        removeParticle(this._x + dir, this._y);
-        placeParticle(this._x + dir, this._y, new SmokeParticle(this._x + dir, this._y, grid));
+    const LavaParticle = defineParticleType('Lava', '#ff8c00', '#ff8c00', function() {
+      if (!this.moveIfCan(0, 1)) {
+        let dir = randi(0, 1) === 0 ? -1 : 1;
+        if (!this.moveIfCan(dir, 0)) {
+          let neighbor = getParticle(this._x + dir, this._y);
+          if (neighbor && neighbor._type === 'Water') {
+            removeParticle(this._x + dir, this._y);
+            placeParticle(this._x + dir, this._y, new SmokeParticle(this._x + dir, this._y, grid));
+          }
+          return false;
+        }
+      }
+      let below = getParticle(this._x, this._y + 1);
+      if (below && below._type === 'Water') {
+        removeParticle(this._x, this._y + 1);
+        placeParticle(this._x, this._y + 1, new SmokeParticle(this._x, this._y + 1, grid));
+      }
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          if (dx === 0 && dy === 0) continue;
+          const neighbor = getParticle(this._x + dx, this._y + dy);
+          if (neighbor && neighbor._type === 'Wood') {
+            removeParticle(this._x + dx, this._y + dy);
+            placeParticle(this._x + dx, this._y + dy, new FireParticle(this._x + dx, this._y + dy, grid));
+          }
+        }
+      }
+      return true;
+    });
+    LavaParticle.prototype.density = 15;
+
+    const FuelParticle = defineParticleType('Fuel', '#ffcc00', '#ffcc00', function() {
+      return false;
+    });
+    FuelParticle.prototype.density = 5;
+
+    const KeroseneParticle = defineParticleType('Kerosene', '#ff9900', '#ff9900', function() {
+      return false;
+    });
+    KeroseneParticle.prototype.density = 5;
+
+    const C4Particle = defineParticleType('C4', '#ff0000', '#ff0000', function() {
+      return false;
+    });
+    C4Particle.prototype.density = 10;
+
+    const FireworkParticle = defineParticleType('Firework', '#00ffff', '#00ffff', function() {
+      if (!this._exploded) {
+        this._timer ??= 60;
+        if (--this._timer <= 0) {
+          this.explode();
+        }
       }
       return false;
-    }
-  }
-  // Если непосредственно под лавой обнаружена вода, заменяем её дымом.
-  let below = getParticle(this._x, this._y + 1);
-  if (below && below._type === 'Water') {
-    removeParticle(this._x, this._y + 1);
-    placeParticle(this._x, this._y + 1, new SmokeParticle(this._x, this._y + 1, grid));
-  }
-  // Новая логика: если рядом находится дерево, зажигаем его (заменяем дерево на огонь)
-  for (let dx = -1; dx <= 1; dx++) {
-    for (let dy = -1; dy <= 1; dy++) {
-      if (dx === 0 && dy === 0) continue;
-      const neighbor = getParticle(this._x + dx, this._y + dy);
-      if (neighbor && neighbor._type === 'Wood') {
-        removeParticle(this._x + dx, this._y + dy);
-        placeParticle(this._x + dx, this._y + dy, new FireParticle(this._x + dx, this._y + dy, grid));
+    });
+    FireworkParticle.prototype.density = 1;
+    FireworkParticle.prototype.explode = function() {
+      this._exploded = true;
+      for (let i = 0; i < 50; i++) {
+        const angle = randf(0, Math.PI * 2);
+        const speed = randf(0.5, 2);
+        const vx = Math.cos(angle) * speed;
+        const vy = Math.sin(angle) * speed;
+        const particleType = randi(0, 2) === 0 ? FireParticle : SparkParticle;
+        const particle = new particleType(this._x, this._y, grid);
+        particle._vx = vx;
+        particle._vy = vy;
+        particle._ax = 0;
+        particle._ay = 0.1;
+        particle._life = randi(30, 60);
+        particle._decay = 0.98;
+        placeParticle(this._x, this._y, particle);
       }
-    }
-  }
-  return true;
-});
-LavaParticle.prototype.density = 15;
-    
+      this.markForRemoval();
+    };
+
+    const SparkParticle = defineParticleType('Spark', '#ffffff', '#ffffff', function() {
+      if (this._life <= 0) {
+        this.markForRemoval();
+        return false;
+      }
+      this._life--;
+      this._vx *= this._decay;
+      this._vy *= this._decay;
+      this._vy += this._ay;
+      this.moveIfCan(this._vx, this._vy);
+      return true;
+    });
+    SparkParticle.prototype.density = 1;
+
+    const PowderParticle = defineParticleType('Powder', '#808080', '#808080', function() {
+      if (this._ignited) {
+        this.explode();
+        return false;
+      }
+      return false;
+    });
+    PowderParticle.prototype.density = 5;
+    PowderParticle.prototype.explode = function() {
+      this._ignited = true;
+      for (let i = 0; i < 20; i++) {
+        const angle = randf(0, Math.PI * 2);
+        const speed = randf(1, 3);
+        const vx = Math.cos(angle) * speed;
+        const vy = Math.sin(angle) * speed;
+        const particleType = randi(0, 2) === 0 ? FireParticle : SparkParticle;
+        const particle = new particleType(this._x, this._y, grid);
+        particle._vx = vx;
+        particle._vy = vy;
+        particle._ax = 0;
+        particle._ay = 0.1;
+        particle._life = randi(30, 60);
+        particle._decay = 0.98;
+        placeParticle(this._x, this._y, particle);
+      }
+      this.markForRemoval();
+    };
+
     let currentMaterial = SandParticle;
     let isMouseDown = false;
     const mouse = {
@@ -536,7 +615,6 @@ LavaParticle.prototype.density = 15;
       }
       activeParticles.clear();
     });
-    
     const brushWidthValue = document.getElementById('brushWidthValue');
     document.getElementById('brushWidthSlider').value = brushWidth;
     brushWidthValue.innerText = brushWidth;
@@ -551,7 +629,6 @@ LavaParticle.prototype.density = 15;
       updateFrequency = parseInt(e.target.value);
       updateFrequencyValue.innerText = updateFrequency;
     });
-    
     const colorLookup = {};
     function paintPixel(x, y, color) {
       if(!colorLookup[color]) {
@@ -635,7 +712,6 @@ LavaParticle.prototype.density = 15;
       ctx.putImageData(imageData, 0, 0);
       info.innerHTML = `Active particles: ${count}`;
     }
-    
     const reactions = {};
     function createPair(particleType1, particleType2) {
       return (particleType1?.ID ?? particleType1?.constructor.ID ?? 1) | (particleType2?.ID ?? particleType2?.constructor.ID ?? 1);
@@ -709,67 +785,211 @@ LavaParticle.prototype.density = 15;
       result1: FireParticle,
       result2: FireParticle,
     });
-    function react() {
-      for(let x = 0; x < gridWidth; x++) {
-        for(let y = 0; y < gridHeight; y++) {
-          const particle1 = getParticle(x, y);
-          if(!particle1) continue;
-          for(let x2 = x-1; x2 <= x+1; x2++) {
-            for(let y2 = y-1; y2 <= y+1; y2++) {
-              const particle2 = getParticle(x2, y2);
-              const reactionKey = createPair(particle1, particle2);
-              const reaction = reactions[reactionKey];
-              if(reaction) {
-                if(reaction && randi(1, 1000) <= reaction.chance) {
-                  if(reaction.result1) {
-                    if(typeof(reaction.result1) == 'function') {
-                      replaceParticle(x, y, new reaction.result1(x, y, grid));
-                    } else {
-                      if(randi(1, 100) <= reaction.result1[1]) {
-                        replaceParticle(x, y, new reaction.result1[0](x, y, grid));
-                      } else {
-                        removeParticle(x, y);
-                      }
-                    }
-                  } else {
-                    removeParticle(x, y);
-                  }
-                  if(reaction.result2) {
-                    if(typeof(reaction.result2) == 'function') {
-                      replaceParticle(x, y, new reaction.result2(x, y, grid));
-                    } else {
-                      if(randi(1, 100) <= reaction.result2[1]) {
-                        replaceParticle(x, y, new reaction.result2[0](x, y, grid));
-                      } else {
-                        removeParticle(x, y);
-                      }
-                    }
-                  } else {
-                    removeParticle(x2, y2);
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    let lastUpdate = Date.now();
-    function gameLoop() {
-      if(mouse.isDown) {
-        drawLine(mouse.prevX, mouse.prevY, mouse.x, mouse.y, brushWidth, mouse.button == 0 ? placeParticle : removeParticle);
-        mouse.prevX = mouse.x;
-        mouse.prevY = mouse.y;
-      }
-      if(!paused && (Date.now() - lastUpdate >= 1000 / updateFrequency)) {
-        lastUpdate = Date.now();
-        update();
-        react();
-      }
-      requestAnimationFrame(gameLoop);
-    }
-    requestAnimationFrame(gameLoop);
-  </script>
-</body>
-</html>
+    registerReaction(C4Particle, FireParticle, {
+chance: 100,
+result1: null,
+result2: [ExplosionParticle, 100]
+});
+
+registerReaction(C4Particle, PowderParticle, {
+chance: 100,
+result1: null,
+result2: [ExplosionParticle, 100]
+});
+
+registerReaction(FireworkParticle, null, {
+chance: 1,
+result1: [SparkParticle, 100]
+});
+
+registerReaction(PowderParticle, FireParticle, {
+chance: 100,
+result1: null,
+result2: [ExplosionParticle, 100]
+});
+
+registerReaction(BenzineParticle, FireParticle, {
+chance: 100,
+result1: null,
+result2: [ExplosionParticle, 100]
+});
+
+registerReaction(KeroseneParticle, FireParticle, {
+chance: 100,
+result1: null,
+result2: [ExplosionParticle, 100]
+});
+
+const BenzineParticle = defineParticleType('Benzine', '#ffcc00', '#ffcc00', function() {
+if (this._ignited) {
+this.explode();
+return false;
+}
+return false;
+});
+BenzineParticle.prototype.density = 5;
+BenzineParticle.prototype.explode = function() {
+this._ignited = true;
+for (let i = 0; i < 50; i++) {
+const angle = randf(0, Math.PI * 2);
+const speed = randf(1, 3);
+const vx = Math.cos(angle) * speed;
+const vy = Math.sin(angle) * speed;
+const particleType = randi(0, 2) === 0 ? FireParticle : SparkParticle;
+const particle = new particleType(this._x, this._y, grid);
+particle._vx = vx;
+particle._vy = vy;
+particle._ax = 0;
+particle._ay = 0.1;
+particle._life = randi(30, 60);
+particle._decay = 0.98;
+placeParticle(this._x, this._y, particle);
+}
+this.markForRemoval();
+};
+
+const KeroseneParticle = defineParticleType('Kerosene', '#ff9900', '#ff9900', function() {
+if (this._ignited) {
+this.explode();
+return false;
+}
+return false;
+});
+KeroseneParticle.prototype.density = 5;
+KeroseneParticle.prototype.explode = function() {
+this._ignited = true;
+for (let i = 0; i < 50; i++) {
+const angle = randf(0, Math.PI * 2);
+const speed = randf(1, 3);
+const vx = Math.cos(angle) * speed;
+const vy = Math.sin(angle) * speed;
+const particleType = randi(0, 2) === 0 ? FireParticle : SparkParticle;
+const particle = new particleType(this._x, this._y, grid);
+particle._vx = vx;
+particle._vy = vy;
+particle._ax = 0;
+particle._ay = 0.1;
+particle._life = randi(30, 60);
+particle._decay = 0.98;
+placeParticle(this._x, this._y, particle);
+}
+this.markForRemoval();
+};
+
+const C4Particle = defineParticleType('C4', '#ff0000', '#ff0000', function() {
+if (this._ignited) {
+this.explode();
+return false;
+}
+return false;
+});
+C4Particle.prototype.density = 10;
+C4Particle.prototype.explode = function() {
+this._ignited = true;
+for (let i = 0; i < 100; i++) {
+const angle = randf(0, Math.PI * 2);
+const speed = randf(2, 5);
+const vx = Math.cos(angle) * speed;
+const vy = Math.sin(angle) * speed;
+const particleType = randi(0, 2) === 0 ? FireParticle : SparkParticle;
+const particle = new particleType(this._x, this._y, grid);
+particle._vx = vx;
+particle._vy = vy;
+particle._ax = 0;
+particle._ay = 0.1;
+particle._life = randi(60, 120);
+particle._decay = 0.97;
+placeParticle(this._x, this._y, particle);
+}
+this.markForRemoval();
+};
+
+const FireworkParticle = defineParticleType('Firework', '#00ffff', '#00ffff', function() {
+if (!this._exploded) {
+this._timer ??= 60;
+if (--this._timer <= 0) {
+this.explode();
+}
+}
+return false;
+});
+FireworkParticle.prototype.density = 1;
+FireworkParticle.prototype.explode = function() {
+this._exploded = true;
+for (let i = 0; i < 100; i++) {
+const angle = randf(0, Math.PI * 2);
+const speed = randf(1, 4);
+const vx = Math.cos(angle) * speed;
+const vy = Math.sin(angle) * speed;
+const particleType = randi(0, 2) === 0 ? FireParticle : SparkParticle;
+const particle = new particleType(this._x, this._y, grid);
+particle._vx = vx;
+particle._vy = vy;
+particle._ax = 0;
+particle._ay = 0.1;
+particle._life = randi(60, 120);
+particle._decay = 0.98;
+placeParticle(this._x, this._y, particle);
+}
+this.markForRemoval();
+};
+
+const PowderParticle = defineParticleType('Powder', '#808080', '#808080', function() {
+if (this._ignited) {
+this.explode();
+return false;
+}
+return false;
+});
+PowderParticle.prototype.density = 5;
+PowderParticle.prototype.explode = function() {
+this._ignited = true;
+for (let i = 0; i < 50; i++) {
+const angle = randf(0, Math.PI * 2);
+const speed = randf(1, 3);
+const vx = Math.cos(angle) * speed;
+const vy = Math.sin(angle) * speed;
+const particleType = randi(0, 2) === 0 ? FireParticle : SparkParticle;
+const particle = new particleType(this._x, this._y, grid);
+particle._vx = vx;
+particle._vy = vy;
+particle._ax = 0;
+particle._ay = 0.1;
+particle._life = randi(30, 60);
+particle._decay = 0.98;
+placeParticle(this._x, this._y, particle);
+}
+this.markForRemoval();
+};
+
+const ExplosionParticle = defineParticleType('Explosion', '#ff0000', '#ff0000', function() {
+this._vx ??= 0;
+this._vy ??= 0;
+this._ax ??= 0;
+this._ay ??= 0.1;
+this._life ??= randi(30, 60);
+this._decay ??= 0.95;
+this._size ??= randf(0.5, 1.5);
+});
+ExplosionParticle.prototype.density = 1;
+ExplosionParticle.prototype.update = function() {
+if (this._lastUpdateTick === tick || !this._awake) return;
+this._lastUpdateTick = tick;
+this.savePosition();
+this._life--;
+if (this._life <= 0) {
+this.markForRemoval();
+return;
+}
+this._vx *= this._decay;
+this._vy *= this._decay;
+this._vy += this._ay;
+this.moveIfCan(this._vx, this._vy);
+this._size *= this._decay;
+this.render();
+};
+ExplosionParticle.prototype.render = function() {
+paintPixel(this._prevX, this._prevY, 'black');
+const color = Color('#ff0000').lightenByAmount(this._size * 0.2).toCSS();
+paintPixel(this._x, this._y, color);
+};
