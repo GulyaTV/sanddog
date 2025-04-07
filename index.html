@@ -432,182 +432,42 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
     GOLParticle.prototype.density = 10;
     
     // Добавляем новый тип частиц: Лава
-    const LavaParticle = defineParticleType('Lava', '#ff8c00', '#ff8c00', function() {
-      // Лава ведёт себя как жидкость, но с большей вязкостью.
-      // Сначала пытаемся двигаться вниз.
-      if (!this.moveIfCan(0, 1)) {
-        // Если вниз занято, пробуем переместиться вбок.
-        let dir = randi(0, 1) === 0 ? -1 : 1;
-        if (!this.moveIfCan(dir, 0)) {
-          // Если в выбранном направлении уже находится вода, заменяем воду дымом (парообразование)
-          let neighbor = getParticle(this._x + dir, this._y);
-          if (neighbor && neighbor._type === 'Water') {
-            removeParticle(this._x + dir, this._y);
-            placeParticle(this._x + dir, this._y, new SmokeParticle(this._x + dir, this._y, grid));
-          }
-          return false;
-        }
+const LavaParticle = defineParticleType('Lava', '#ff8c00', '#ff8c00', function() {
+  // Лава ведёт себя как жидкость, но с большей вязкостью.
+  // Сначала пытаемся двигаться вниз.
+  if (!this.moveIfCan(0, 1)) {
+    // Если вниз занято, пробуем переместиться вбок.
+    let dir = randi(0, 1) === 0 ? -1 : 1;
+    if (!this.moveIfCan(dir, 0)) {
+      // Если в выбранном направлении уже находится вода, заменяем воду дымом (парообразование)
+      let neighbor = getParticle(this._x + dir, this._y);
+      if (neighbor && neighbor._type === 'Water') {
+        removeParticle(this._x + dir, this._y);
+        placeParticle(this._x + dir, this._y, new SmokeParticle(this._x + dir, this._y, grid));
       }
-      // Если непосредственно под лавой обнаружена вода, заменяем её дымом.
-      let below = getParticle(this._x, this._y + 1);
-      if (below && below._type === 'Water') {
-        removeParticle(this._x, this._y + 1);
-        placeParticle(this._x, this._y + 1, new SmokeParticle(this._x, this._y + 1, grid));
+      return false;
+    }
+  }
+  // Если непосредственно под лавой обнаружена вода, заменяем её дымом.
+  let below = getParticle(this._x, this._y + 1);
+  if (below && below._type === 'Water') {
+    removeParticle(this._x, this._y + 1);
+    placeParticle(this._x, this._y + 1, new SmokeParticle(this._x, this._y + 1, grid));
+  }
+  // Новая логика: если рядом находится дерево, зажигаем его (заменяем дерево на огонь)
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      if (dx === 0 && dy === 0) continue;
+      const neighbor = getParticle(this._x + dx, this._y + dy);
+      if (neighbor && neighbor._type === 'Wood') {
+        removeParticle(this._x + dx, this._y + dy);
+        placeParticle(this._x + dx, this._y + dy, new FireParticle(this._x + dx, this._y + dy, grid));
       }
-      // Новая логика: если рядом находится дерево, зажигаем его (заменяем дерево на огонь)
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dy = -1; dy <= 1; dy++) {
-          if (dx === 0 && dy === 0) continue;
-          const neighbor = getParticle(this._x + dx, this._y + dy);
-          if (neighbor && neighbor._type === 'Wood') {
-            removeParticle(this._x + dx, this._y + dy);
-            placeParticle(this._x + dx, this._y + dy, new FireParticle(this._x + dx, this._y + dy, grid));
-          }
-        }
-      }
-      return true;
-    });
-    
-    LavaParticle.prototype.density = 15;
-
-    // Бензин (легковоспламеняющаяся жидкость)
-    const GasolineParticle = defineParticleType('Gasoline', '#ffd700', '#ffd70080', function() {
-        // Движение похоже на воду
-        if(!this.moveIfCan(0, 1)) {
-            const dir = randi(-1, 1);
-            this.moveIfCan(dir, 0);
-        }
-        
-        // Испарение в горючий газ
-        if(randi(1, 100) <= 2) {
-            placeParticle(this._x, this._y - 1, new FlammableGasParticle(this._x, this._y - 1, this._grid));
-        }
-        
-        // Самовозгорание при контакте с огнем
-        for(let dx = -1; dx <= 1; dx++) {
-            for(let dy = -1; dy <= 1; dy++) {
-                if(isParticle(this._x + dx, this._y + dy, 'Fire')) {
-                    this.markForRemoval();
-                    placeParticle(this._x, this._y, new FireParticle(this._x, this._y, this._grid));
-                    for(let i = -2; i <= 2; i++) {
-                        placeParticle(this._x + i, this._y, new FireParticle(this._x + i, this._y, this._grid));
-                    }
-                }
-            }
-        }
-    });
-    GasolineParticle.prototype.density = 3;
-
-    // Керосин (медленное горение)
-    const KeroseneParticle = defineParticleType('Kerosene', '#c6ba32', '#c6ba3280', function() {
-        if(!this.moveIfCan(0, 1)) {
-            this.moveIfCan(randi(-1, 1), 0);
-        }
-        
-        // Медленное испарение
-        if(randi(1, 1000) <= 1) {
-            placeParticle(this._x, this._y - 1, new FlammableGasParticle(this._x, this._y - 1, this._grid));
-        }
-    });
-    KeroseneParticle.prototype.density = 4;
-
-    // C4 (взрывчатка)
-    const C4Particle = defineParticleType('C4', '#2c2c2c', '#2c2c2c', function() {
-        // Поиск огня или искр поблизости
-        for(let dx = -2; dx <= 2; dx++) {
-            for(let dy = -2; dy <= 2; dy++) {
-                if(isParticle(this._x + dx, this._y + dy, ['Fire', 'Spark'])) {
-                    // Создаем взрыв
-                    for(let x = -5; x <= 5; x++) {
-                        for(let y = -5; y <= 5; y++) {
-                            if(Math.hypot(x, y) < 4 && randi(0, 1)) {
-                                removeParticle(this._x + x, this._y + y);
-                                if(randi(1, 10) <= 3) {
-                                    placeParticle(this._x + x, this._y + y, new FireParticle(this._x + x, this._y + y, this._grid));
-                                }
-                            }
-                        }
-                    }
-                    this.markForRemoval();
-                }
-            }
-        }
-    });
-    C4Particle.prototype.density = 15;
-
-    // Фейерверк (запускается вверх и взрывается)
-    const FireworkParticle = defineParticleType('Firework', '#ff5555', '#ff5555', function() {
-        if(!this._launched) {
-            // Фаза запуска
-            if(this.moveIfCan(0, -1)) {
-                this._launched = true;
-            }
-        } else {
-            // Фаза взрыва
-            if(randi(1, 100) <= 20) {
-                for(let i = 0; i < 360; i += 45) {
-                    const dx = Math.cos(i * Math.PI/180);
-                    const dy = Math.sin(i * Math.PI/180);
-                    placeParticle(this._x + dx*2, this._y + dy*2, 
-                        new SparkParticle(this._x + dx*2, this._y + dy*2, this._grid));
-                }
-                this.markForRemoval();
-            }
-        }
-    });
-
-    // Искры для фейерверка
-    const SparkParticle = defineParticleType('Spark', '#ffff00', '#ffff00', function() {
-        this._life = (this._life || 0) + 1;
-        if(this._life > 10) this.markForRemoval();
-        this.moveIfCan(randi(-1, 1), -1);
-    });
-    SparkParticle.prototype.density = 1;
-
-    // Порох (быстрое горение)
-    const GunpowderParticle = defineParticleType('Gunpowder', '#616161', '#616161', function() {
-        // Цепная реакция
-        for(let dx = -1; dx <= 1; dx++) {
-            for(let dy = -1; dy <= 1; dy++) {
-                if(isParticle(this._x + dx, this._y + dy, 'Fire')) {
-                    this.markForRemoval();
-                    placeParticle(this._x, this._y, new FireParticle(this._x, this._y, this._grid));
-                    if(randi(1, 100) <= 30) {
-                        placeParticle(this._x + dx, this._y + dy, new FireParticle(this._x + dx, this._y + dy, this._grid));
-                    }
-                }
-            }
-        }
-    });
-    GunpowderParticle.prototype.density = 8;
-
-    // Горючий газ
-    const FlammableGasParticle = defineParticleType('FlammableGas', '#ff990055', '#ff990055', function() {
-        this.moveIfCan(randi(-1, 1), -1);
-        // Самовоспламенение
-        if(randi(1, 1000) <= 5 || isParticle(this._x, this._y, 'Fire')) {
-            placeParticle(this._x, this._y, new FireParticle(this._x, this._y, this._grid));
-        }
-    });
-
-    // Регистрация реакций
-    registerReaction(FireParticle, GasolineParticle, {
-        chance: 1000,
-        result1: FireParticle,
-        result2: FireParticle
-    });
-
-    registerReaction(FireParticle, KeroseneParticle, {
-        chance: 800,
-        result1: FireParticle,
-        result2: FireParticle
-    });
-
-    registerReaction(C4Particle, FireParticle, {
-        chance: 1000,
-        result1: null,
-        result2: FireParticle
-    });
+    }
+  }
+  return true;
+});
+LavaParticle.prototype.density = 15;
     
     let currentMaterial = SandParticle;
     let isMouseDown = false;
