@@ -432,31 +432,42 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
     GOLParticle.prototype.density = 10;
     
     // Добавляем новый тип частиц: Лава
-    const LavaParticle = defineParticleType('Lava', '#ff8c00', '#ff8c00', function() {
-      // Лава ведёт себя как жидкость, но с большей вязкостью.
-      // Сначала пытаемся двигаться вниз.
-      if(!this.moveIfCan(0, 1)) {
-        // Если вниз занято, пробуем переместиться вбок.
-        let dir = randi(0, 1) === 0 ? -1 : 1;
-        if(!this.moveIfCan(dir, 0)) {
-          // Если в выбранном направлении уже находится вода, заменяем воду дымом (парообразование)
-          let neighbor = getParticle(this._x + dir, this._y);
-          if(neighbor && neighbor._type === 'Water') {
-            removeParticle(this._x + dir, this._y);
-            placeParticle(this._x + dir, this._y, new SmokeParticle(this._x + dir, this._y, grid));
-          }
-          return false;
-        }
+const LavaParticle = defineParticleType('Lava', '#ff8c00', '#ff8c00', function() {
+  // Лава ведёт себя как жидкость, но с большей вязкостью.
+  // Сначала пытаемся двигаться вниз.
+  if (!this.moveIfCan(0, 1)) {
+    // Если вниз занято, пробуем переместиться вбок.
+    let dir = randi(0, 1) === 0 ? -1 : 1;
+    if (!this.moveIfCan(dir, 0)) {
+      // Если в выбранном направлении уже находится вода, заменяем воду дымом (парообразование)
+      let neighbor = getParticle(this._x + dir, this._y);
+      if (neighbor && neighbor._type === 'Water') {
+        removeParticle(this._x + dir, this._y);
+        placeParticle(this._x + dir, this._y, new SmokeParticle(this._x + dir, this._y, grid));
       }
-      // Если непосредственно под лавой обнаружена вода, заменяем её дымом.
-      let below = getParticle(this._x, this._y + 1);
-      if(below && below._type === 'Water') {
-        removeParticle(this._x, this._y + 1);
-        placeParticle(this._x, this._y + 1, new SmokeParticle(this._x, this._y + 1, grid));
+      return false;
+    }
+  }
+  // Если непосредственно под лавой обнаружена вода, заменяем её дымом.
+  let below = getParticle(this._x, this._y + 1);
+  if (below && below._type === 'Water') {
+    removeParticle(this._x, this._y + 1);
+    placeParticle(this._x, this._y + 1, new SmokeParticle(this._x, this._y + 1, grid));
+  }
+  // Новая логика: если рядом находится дерево, зажигаем его (заменяем дерево на огонь)
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      if (dx === 0 && dy === 0) continue;
+      const neighbor = getParticle(this._x + dx, this._y + dy);
+      if (neighbor && neighbor._type === 'Wood') {
+        removeParticle(this._x + dx, this._y + dy);
+        placeParticle(this._x + dx, this._y + dy, new FireParticle(this._x + dx, this._y + dy, grid));
       }
-      return true;
-    });
-    LavaParticle.prototype.density = 15;
+    }
+  }
+  return true;
+});
+LavaParticle.prototype.density = 15;
     
     let currentMaterial = SandParticle;
     let isMouseDown = false;
