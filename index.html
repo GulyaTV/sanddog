@@ -89,6 +89,7 @@
     <div id="info">
       <span></span>
     </div>
+    <script async src="https://gamepush.com/sdk/gamepush.js?projectId=23640&publicToken=1M6cjAYvOqkGvtpFuyoimMHlT3rJODTr&callback=onGPInit"></script>
     <script
       src="https://cdnjs.cloudflare.com/ajax/libs/color-js/1.0.1/color.min.js"
       integrity="sha512-ODHUqBj0yOk4rj5ORt7EExbT4Jq+yQ5EbeQH2Ri3eMkCBIR9wgUOWXO5CYr37yl2pV1+YdXIPbAYgEKHyM/k8A=="
@@ -96,6 +97,10 @@
       referrerpolicy="no-referrer"
     ></script>
     <script>
+      window.onGPInit = function (gp) {
+        // Все возможности GamePush доступны здесь
+      }
+      
       const Color = net.brehaut.Color;
       const info = document.querySelector("#info>span");
       /**
