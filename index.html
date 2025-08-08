@@ -1,6 +1,10 @@
 <html>
   <head>
     <title>SandDog</title>
+    <!-- Yandex.RTB -->
+    <script>window.yaContextCb=window.yaContextCb||[]</script>
+    <script src="https://yandex.ru/ads/system/context.js" async></script>
+    <script async src="https://gamepush.com/sdk/gamepush.js?projectId=23640&publicToken=1M6cjAYvOqkGvtpFuyoimMHlT3rJODTr&callback=onGPInit"></script>
     <style>
       body {
         background-color: slategray;
@@ -96,9 +100,17 @@
       crossorigin="anonymous"
       referrerpolicy="no-referrer"
     ></script>
-    <!-- Yandex.RTB -->
-    <script>window.yaContextCb=window.yaContextCb||[]</script>
-    <script src="https://yandex.ru/ads/system/context.js" async></script>
+
+    <!-- Yandex.RTB R-A-16648278-1 -->
+    <script>
+      window.yaContextCb.push(() => {
+        Ya.Context.AdvManager.render({
+          "blockId": "R-A-16648278-1",
+          "type": "floorAd",
+          "platform": "desktop"
+        })
+      })
+    </script>
     <script>
       window.onGPInit = function (gp) {
         gp.ads.showSticky();
