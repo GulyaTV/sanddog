@@ -96,8 +96,10 @@
       referrerpolicy="no-referrer"
     ></script>
     <script>
-      
-      const Color = net.brehaut.Color;
+      // BUGFIX: `net.brehaut.Color` threw a ReferenceError when the CDN script
+      // failed to load, killing the whole game. Guard the access; paintPixel has
+      // its own local color-parsing fallback.
+      const Color = typeof net !== "undefined" ? net.brehaut.Color : undefined;
       const info = document.querySelector("#info>span");
       /**
        *  @type HTMLCanvasElement
@@ -106,45 +108,66 @@
       const ctx = canvas.getContext("2d");
       const cellSize = 4; // Set the size of each cell in the grid
       let updateFrequency = 60; // In ticks per second
-      let paused = false;
+      // Start paused so the user can paint before pressing "Start"
+      let paused = true;
       let brushWidth = 5;
       let tick = 0;
       const activeParticles = new Map();
-      const gridWidth = canvas.width / cellSize;
-      const gridHeight = canvas.height / cellSize;
-      const imageData = ctx.createImageData(gridWidth, gridHeight);
+      // BUGFIX: canvas.width/height must be set BEFORE grabbing the 2d context,
+      // otherwise the context (and its imageData) keep the old dimensions.
       canvas.style.width = `${canvas.width}px`;
       canvas.style.height = `${canvas.height}px`;
       canvas.style.imageRendering = "pixelated";
       canvas.width /= cellSize;
       canvas.height /= cellSize;
+      const gridWidth = canvas.width;
+      const gridHeight = canvas.height;
+      const imageData = ctx.createImageData(gridWidth, gridHeight);
+      // BUGFIX: clear the canvas buffer once so every pixel starts fully opaque;
+      // transparent pixels would otherwise show through when painting background-colored cells.
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, gridWidth, gridHeight);
       // Create the grid array to store the state of each cell
       let grid = [];
       function resetGrid() {
+        grid = [];
         for (let x = 0; x < gridWidth; x++) {
-          grid[x] = [];
+          grid[x] = new Array(gridHeight).fill(null);
         }
       }
       resetGrid();
       function loadTexture(url) {
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
+        const textureCanvas = document.createElement("canvas");
+        const textureCtx = textureCanvas.getContext("2d");
         const img = new Image();
-        let data, w, h;
+        // BUGFIX: the texture is a tiny inline base64 PNG that can finish loading
+        // before this function returns (or even synchronously from cache), leaving
+        // `data` undefined and crashing sand rendering on the first pixel read.
+        // Decode synchronously when possible and fall back to a default color.
+        let data = null,
+          w = 3,
+          h = 3;
+        function decode() {
+          w = img.width || 3;
+          h = img.height || 3;
+          textureCanvas.width = w;
+          textureCanvas.height = h;
+          textureCtx.drawImage(img, 0, 0);
+          data = textureCtx.getImageData(0, 0, w, h).data;
+        }
+        if (img.complete && img.naturalWidth > 0) {
+          decode();
+        } else {
+          img.addEventListener("load", decode);
+        }
         img.src = url;
-        img.addEventListener("load", () => {
-          w = img.width;
-          h = img.height;
-          canvas.width = w;
-          canvas.height = h;
-          ctx.drawImage(img, 0, 0);
-          data = ctx.getImageData(0, 0, w, h).data;
-        });
         return {
           getPixel(x, y) {
-            const r = data[(w * y + x) * 4],
-              g = data[(w * y + x) * 4 + 1],
-              b = data[(w * y + x) * 4 + 2];
+            if (!data) return "#c9b458"; // sandy fallback while the texture loads
+            const i = (w * y + x) * 4;
+            const r = data[i],
+              g = data[i + 1],
+              b = data[i + 2];
             return `#${r.toString(16).padStart(2, "0")}${g
               .toString(16)
               .padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
@@ -223,6 +246,12 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
           this._remove = true;
         }
         update() {
+          // BUGFIX: static particles (Solid/Wood/GOL) never move, so without this
+          // they would fall asleep after 60 ticks and stop reacting to neighbors
+          // (e.g. fire placed next to sleeping wood would never spread).
+          if (this.static) {
+            this._lastSuccessfulUpdate = tick;
+          }
           if (this._lastUpdateTick === tick || !this._awake) return;
           this._lastUpdateTick = tick;
           this.savePosition();
@@ -254,22 +283,31 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
         canMove(dx, dy) {
           const newX = this._x + dx;
           const newY = this._y + dy;
+          // BUGFIX: removed the redundant/contradictory second condition
+          // (`!grid[newX][newY] && (grid[newX][newY] === null || !grid[newX][newY])`)
+          // and added integer bounds checks so out-of-bounds indices can never
+          // falsely report a free cell on sparse arrays.
           return (
+            Number.isInteger(newX) &&
+            Number.isInteger(newY) &&
             newX >= 0 &&
             newX < gridWidth &&
             newY >= 0 &&
             newY < gridHeight &&
-            !this._grid[newX][newY] &&
-            (this._grid[newX][newY] === null || !this._grid[newX][newY])
+            !this._grid[newX][newY]
           );
         }
         moveIfCan(dx, dy) {
           let otherParticle = getParticle(this._x + dx, this._y + dy);
           if (otherParticle) {
-            otherParticle.update();
-            otherParticle = getParticle(this._x + dx, this._y + dy);
-            if (otherParticle) {
+            // BUGFIX: only try to displace particles that are actually mobile.
+            // Displacing static particles (Solid/Wood) or swapping with yourself
+            // (when dx/dy is 0) corrupted the grid state.
+            if (otherParticle !== this && !otherParticle.static) {
+              otherParticle.update();
+              otherParticle = getParticle(this._x + dx, this._y + dy);
               if (
+                otherParticle &&
                 (otherParticle.density ?? 0) < (this.density ?? 0) &&
                 randi(1, 100) <= 30
               ) {
@@ -277,6 +315,9 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
                 return true;
               }
             }
+          } else if (!this.canMove(dx, dy)) {
+            // A non-particle occupies the destination (e.g. out of bounds) – bail out.
+            return false;
           }
           if (this.canMove(dx, dy)) {
             this._grid[this._x][this._y] = null;
@@ -293,6 +334,7 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
           const otherX = this._x + dx;
           const otherY = this._y + dy;
           const otherParticle = getParticle(otherX, otherY);
+          if (!otherParticle || otherParticle === this) return;
           otherParticle.savePosition();
           grid[otherParticle._x][otherParticle._y] = this;
           otherParticle._x = this._x;
@@ -301,11 +343,13 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
           this.savePosition();
           this._x = otherX;
           this._y = otherY;
-          paintPixel(this._x, this._y, otherParticle._color);
-          paintPixel(otherParticle._x, otherParticle._y, this._color);
+          // BUGFIX: the old code painted each cell with the *other* particle's
+          // color and then overwrote both cells with the same (wrong) colors in
+          // render(). Now each cell simply gets its own particle's color.
+          paintPixel(this._x, this._y, this._color);
+          paintPixel(otherParticle._x, otherParticle._y, otherParticle._color);
           wakeNeighbors(this._prevX, this._prevY);
-          otherParticle.render();
-          this.render();
+          wakeNeighbors(this._x, this._y);
         }
         toString() {
           return `${this._x}_${this._y}`;
@@ -314,7 +358,10 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
       let classID = 2;
       function defineParticleType(name, buttonColor, particleColor, updateFn) {
         const newParticleClass = class extends Particle {
-          static ID = (classID <<= 1);
+          // BUGFIX: `(classID <<= 1)` shifted by the *bit position*, so every class
+          // from the 7th onward got ID 0 and all reaction pair keys collided.
+          // IDs are now unique powers of two.
+          static ID = classID;
           constructor(x, y, grid) {
             super(x, y, grid);
             if (typeof particleColor == "function") {
@@ -326,18 +373,22 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
           }
           _update = updateFn;
           render() {
-            paintPixel(this._prevX, this._prevY, "black");
             paintPixel(this._x, this._y, this._color);
           }
         };
+        classID <<= 1;
         const button = document.createElement("button");
         button.classList.add("button");
         button.style.backgroundColor = buttonColor;
         button.innerText = name;
-        button.addEventListener(
-          "click",
-          () => (currentMaterial = newParticleClass)
-        );
+        button.addEventListener("click", () => {
+          currentMaterial = newParticleClass;
+          // Visual feedback about which material is currently selected.
+          for (const b of document.querySelectorAll(".materials__buttons button")) {
+            b.classList.remove("materials__buttons--selected");
+          }
+          button.classList.add("materials__buttons--selected");
+        });
         document.querySelector(".materials__buttons").appendChild(button);
         return newParticleClass;
       }
@@ -450,6 +501,8 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
         }
       );
       SolidParticle.prototype.density = 10;
+      // Static particles must never fall asleep, otherwise reactions with them stop.
+      SolidParticle.prototype.static = true;
       const AntsParticle = defineParticleType(
         "Ants",
         "#bf3333",
@@ -485,13 +538,38 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
         }
       );
       WoodParticle.prototype.density = 10;
+      WoodParticle.prototype.static = true;
       const FireParticle = defineParticleType(
         "Fire",
         "red",
         "red",
         function () {
+          // BUGFIX: fire used to return `true` unconditionally, so it never slept
+          // and kept re-rendering forever. It now stays awake only while there is
+          // fuel (Wood/Gas) nearby or a chance to spread smoke upward; when alone
+          // it dies out instead of flickering eternally.
           this._color = ["yellow", "orange", "red"][randi(0, 2)];
-          return true;
+          let hasFuel = false;
+          for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+              if (isParticle(this._x + dx, this._y + dy, ["Wood", "Gas"])) {
+                hasFuel = true;
+              }
+            }
+          }
+          if (hasFuel) return true;
+          // No fuel: occasionally emit smoke upward...
+          if (randi(1, 100) <= 5 && this.canMove(0, -1)) {
+            placeParticle(
+              this._x,
+              this._y - 1,
+              new SmokeParticle(this._x, this._y - 1, grid)
+            );
+            return true;
+          }
+          // ...otherwise burn out.
+          this.markForRemoval();
+          return false;
         }
       );
       FireParticle.prototype.density = 1;
@@ -588,6 +666,9 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
         }
       );
       GOLParticle.prototype.density = 10;
+      // GOL cells never move; without `static` they fall asleep after 60 ticks
+      // and the cellular automaton silently freezes.
+      GOLParticle.prototype.static = true;
 
       // Добавляем новый тип частиц: Лава
       const LavaParticle = defineParticleType(
@@ -596,42 +677,30 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
         "#ff8c00",
         function () {
           // Лава ведёт себя как жидкость, но с большей вязкостью.
-          // Сначала пытаемся двигаться вниз.
-          if (!this.moveIfCan(0, 1)) {
-            // Если вниз занято, пробуем переместиться вбок.
-            let dir = randi(0, 1) === 0 ? -1 : 1;
-            if (!this.moveIfCan(dir, 0)) {
-              // Если в выбранном направлении уже находится вода, заменяем воду дымом (парообразование)
-              let neighbor = getParticle(this._x + dir, this._y);
-              if (neighbor && neighbor._type === "Water") {
-                removeParticle(this._x + dir, this._y);
-                placeParticle(
-                  this._x + dir,
-                  this._y,
-                  new SmokeParticle(this._x + dir, this._y, grid)
-                );
-              }
-              return false;
-            }
-          }
-          // Если непосредственно под лавой обнаружена вода, заменяем её дымом.
-          let below = getParticle(this._x, this._y + 1);
-          if (below && below._type === "Water") {
-            removeParticle(this._x, this._y + 1);
-            placeParticle(
-              this._x,
-              this._y + 1,
-              new SmokeParticle(this._x, this._y + 1, grid)
-            );
-          }
-          // Новая логика: если рядом находится дерево, зажигаем его (заменяем дерево на огонь)
+          // BUGFIX: lava now cools into Rock when touching water (previously it
+          // turned the *water* into smoke and left the lava untouched, and it
+          // could also silently delete particles standing in its way).
+          this._color = ["#ff8c00", "#ff6a00", "#e85100"][randi(0, 2)];
           for (let dx = -1; dx <= 1; dx++) {
             for (let dy = -1; dy <= 1; dy++) {
               if (dx === 0 && dy === 0) continue;
               const neighbor = getParticle(this._x + dx, this._y + dy);
-              if (neighbor && neighbor._type === "Wood") {
-                removeParticle(this._x + dx, this._y + dy);
-                placeParticle(
+              if (neighbor && neighbor._type === "Water") {
+                replaceParticle(
+                  this._x,
+                  this._y,
+                  new RockParticle(this._x, this._y, grid)
+                );
+                return false;
+              }
+            }
+          }
+          // Если рядом находится дерево, зажигаем его (заменяем дерево на огонь)
+          for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+              if (dx === 0 && dy === 0) continue;
+              if (isParticle(this._x + dx, this._y + dy, "Wood")) {
+                replaceParticle(
                   this._x + dx,
                   this._y + dy,
                   new FireParticle(this._x + dx, this._y + dy, grid)
@@ -639,13 +708,157 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
               }
             }
           }
-          return true;
+          // Сначала пытаемся двигаться вниз, затем диагональю, затем вбок.
+          if (this.moveIfCan(0, 1)) return true;
+          const dir = randi(0, 1) === 0 ? -1 : 1;
+          if (this.moveIfCan(dir, 1)) return true;
+          return this.moveIfCan(dir, 0);
         }
       );
       LavaParticle.prototype.density = 15;
 
+      // Застывшая лава
+      const RockParticle = defineParticleType(
+        "Rock",
+        "#5a4a42",
+        () => ["#5a4a42", "#4d3f38", "#66554b"][randi(0, 2)],
+        function () {
+          // BUGFIX: rock is affected by gravity – if it is unsupported (e.g. the
+          // lava beneath it cooled or moved away) it falls down instead of
+          // floating in mid-air forever.
+          if (!this.moveIfCan(0, 1)) {
+            const dir = randi(0, 1) === 0 ? -1 : 1;
+            return this.moveIfCan(dir, 1);
+          }
+          return true;
+        }
+      );
+      RockParticle.prototype.density = 12;
+
+      // Почва: ведёт себя как песок, но семена прорастают только на ней
+      const SoilParticle = defineParticleType(
+        "Soil",
+        "#6b4a2b",
+        () => ["#6b4a2b", "#5d3f24", "#795533"][randi(0, 2)],
+        function () {
+          if (!this.moveIfCan(0, 1)) {
+            const dir = randi(0, 1) === 0 ? -1 : 1;
+            return this.moveIfCan(dir, 1);
+          }
+          return true;
+        }
+      );
+      SoilParticle.prototype.density = 11;
+      const DarkEarthParticle = defineParticleType(
+        "DarkEarth",
+        "#3e2b18",
+        () => ["#3e2b18", "#332414", "#48331d"][randi(0, 2)],
+        function () {
+          if (!this.moveIfCan(0, 1)) {
+            const dir = randi(0, 1) === 0 ? -1 : 1;
+            return this.moveIfCan(dir, 1);
+          }
+          return true;
+        }
+      );
+      DarkEarthParticle.prototype.density = 11;
+
+      // НОВЫЙ МАТЕРИАЛ: Семена (Seed) — падают, укореняются в земле и прорастают
+      // в растущее дерево, которое со временем гаснет, оставляя бревно.
+      const SproutParticle = defineParticleType(
+        "Sprout",
+        "#3fae4a",
+        "#3fae4a",
+        function () {
+          this._growth ??= randi(40, 90);
+          this._growth--;
+          if (this._growth > 0) {
+            // Растём вверх, иногда разбрасывая боковые ветки-листья.
+            if (this.canMove(0, -1)) {
+              placeParticle(
+                this._x,
+                this._y - 1,
+                new SproutParticle(this._x, this._y - 1, grid)
+              );
+              this.markForRemoval();
+              return false;
+            }
+            if (randi(1, 100) <= 12) {
+              const dir = randi(0, 1) === 0 ? -1 : 1;
+              if (this.canMove(dir, 0)) {
+                placeParticle(
+                  this._x + dir,
+                  this._y,
+                  new LeafParticle(this._x + dir, this._y, grid)
+                );
+              }
+            }
+            return true;
+          }
+          // Созрело в прочное бревно.
+          replaceParticle(this._x, this._y, new WoodParticle(this._x, this._y, grid));
+          return false;
+        }
+      );
+      SproutParticle.prototype.static = true;
+      const LeafParticle = defineParticleType(
+        "Leaf",
+        "#2e8b57",
+        () => ["#2e8b57", "#3cb371", "#556b2f"][randi(0, 2)],
+        function () {
+          // Листья живут недолго и опадают, превращаясь в перегной (DarkEarth).
+          this._life ??= randi(120, 400);
+          this._life--;
+          if (this._life <= 0) {
+            replaceParticle(
+              this._x,
+              this._y,
+              new DarkEarthParticle(this._x, this._y, grid)
+            );
+            return false;
+          }
+          // Иногда лист опадает вниз, если под ним свободно.
+          const fallDir = randi(-1, 1);
+          if (randi(1, 100) <= 3 && this.canMove(fallDir, 1)) {
+            this.markForRemoval();
+            placeParticle(
+              this._x + fallDir,
+              this._y + 1,
+              new LeafParticle(this._x + fallDir, this._y + 1, grid)
+            );
+            return false;
+          }
+          return true;
+        }
+      );
+      LeafParticle.prototype.static = true;
+      const SeedParticle = defineParticleType(
+        "Seed",
+        "#d8c15c",
+        "#d8c15c",
+        function () {
+          // Падает как песок.
+          if (!this.moveIfCan(0, 1)) {
+            const dir = randi(0, 1) === 0 ? -1 : 1;
+            if (this.moveIfCan(dir, 1)) return true;
+            // Прорастает, если снизу земля/перегной или семя лежит прямо на камне/дереве.
+            const below = getParticle(this._x, this._y + 1);
+            if (below && ["Sand", "DarkEarth", "Soil"].includes(below._type)) {
+              replaceParticle(
+                this._x,
+                this._y,
+                new SproutParticle(this._x, this._y, grid)
+              );
+              return false;
+            }
+            return false;
+          }
+          return true;
+        }
+      );
+      SeedParticle.prototype.density = 9;
+
       let currentMaterial = SandParticle;
-      let isMouseDown = false;
       const mouse = {
         isDown: false,
         button: 0,
@@ -657,16 +870,28 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
       canvas.addEventListener("mousedown", (event) => {
         const mx = Math.floor(event.offsetX / cellSize);
         const my = Math.floor(event.offsetY / cellSize);
-        const particle = getParticle(mouse.x, mouse.y);
-        if (paused && particle) {
-          if (event.button == 0) {
+        if (paused && event.button == 0) {
+          // BUGFIX: inspect the cell under the *click* coordinates (mx/my), not
+          // the stale mouse.x/y from the previous mousemove.
+          const particle = getParticle(mx, my);
+          if (particle) {
             tick++;
             console.log(particle);
             particle.wake();
             particle.update();
-          } else if (event.button == 2) {
-            removeParticle(mx, my);
+            ctx.putImageData(imageData, 0, 0);
+          } else {
+            // Left-click on empty space while paused paints with the current material.
+            mouse.isDown = true;
+            mouse.button = event.button;
+            mouse.prevX = mx;
+            mouse.prevY = my;
+            mouse.x = mx;
+            mouse.y = my;
           }
+        } else if (paused && event.button == 2) {
+          removeParticle(mx, my);
+          ctx.putImageData(imageData, 0, 0);
         } else {
           mouse.isDown = true;
           mouse.button = event.button;
@@ -681,6 +906,10 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
         mouse.y = Math.floor(event.offsetY / cellSize);
       });
       canvas.addEventListener("mouseup", () => (mouse.isDown = false));
+      // BUGFIX: releasing the button outside the canvas used to leave the brush
+      // stuck down and keep painting forever.
+      window.addEventListener("mouseup", () => (mouse.isDown = false));
+      canvas.addEventListener("mouseleave", () => (mouse.isDown = false));
       canvas.addEventListener("contextmenu", (e) => e.preventDefault());
       document
         .getElementById("startButton")
@@ -702,6 +931,8 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
               }
             }
           }
+          // BUGFIX: debug render didn't flush the buffer, so nothing appeared.
+          ctx.putImageData(imageData, 0, 0);
         });
       document.getElementById("wakeAllButton").addEventListener("click", () => {
         for (let x = 0; x < gridWidth; x++) {
@@ -723,6 +954,7 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
             }
           }
           activeParticles.clear();
+          ctx.putImageData(imageData, 0, 0);
         });
 
       const brushWidthValue = document.getElementById("brushWidthValue");
@@ -747,14 +979,59 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
         });
 
       const colorLookup = {};
+      // BUGFIX: the external color-js library (CDN) could fail to load or throw
+      // on CSS color names; parsing colors is now done locally with a fallback.
+      const namedColorFallback = {
+        black: [0, 0, 0],
+        white: [255, 255, 255],
+        red: [255, 0, 0],
+        blue: [0, 0, 255],
+        green: [0, 128, 0],
+        yellow: [255, 255, 0],
+        orange: [255, 165, 0],
+        purple: [128, 0, 128],
+        cyan: [0, 255, 255],
+        gray: [128, 128, 128],
+        grey: [128, 128, 128],
+        brown: [165, 42, 42],
+        pink: [255, 192, 203],
+      };
+      function parseColorToRgb(color) {
+        try {
+          if (typeof Color === "function") {
+            const c = Color(color);
+            return [
+              Math.floor(c.getRed() * 255),
+              Math.floor(c.getGreen() * 255),
+              Math.floor(c.getBlue() * 255),
+            ];
+          }
+        } catch (e) {
+          /* fall through to local parsing */
+        }
+        if (typeof color === "string") {
+          const name = color.trim().toLowerCase();
+          if (namedColorFallback[name]) return namedColorFallback[name];
+          if (name[0] === "#") {
+            let hex = name.slice(1);
+            if (hex.length === 3) {
+              hex = hex
+                .split("")
+                .map((ch) => ch + ch)
+                .join("");
+            }
+            const num = parseInt(hex, 16);
+            if (!Number.isNaN(num)) {
+              return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+            }
+          }
+        }
+        return [255, 0, 255]; // magenta = unknown color, easy to spot
+      }
       function paintPixel(x, y, color) {
+        if (x < 0 || x >= gridWidth || y < 0 || y >= gridHeight) return;
         if (!colorLookup[color]) {
-          const c = Color(color);
-          colorLookup[color] = [
-            Math.floor(c.getRed() * 255),
-            Math.floor(c.getGreen() * 255),
-            Math.floor(c.getBlue() * 255),
-          ];
+          colorLookup[color] = parseColorToRgb(color);
         }
         const [r, g, b] = colorLookup[color];
         imageData.data[(y * gridWidth + x) * 4] = r;
@@ -906,6 +1183,38 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
         result1: FireParticle,
         result2: FireParticle,
       });
+      // BUGFIX: Lava+Water used to be handled inside the Lava update with a bug
+      // (it converted the WATER into smoke and left the lava alone). Register it
+      // as a proper reaction instead: lava cools into rock, water becomes steam.
+      registerReaction(LavaParticle, WaterParticle, {
+        chance: 300,
+        result1: RockParticle,
+        result2: SmokeParticle,
+      });
+      // Seeds burn like any other organic matter.
+      registerReaction(FireParticle, SeedParticle, {
+        chance: 400,
+        result1: FireParticle,
+        result2: FireParticle,
+      });
+      registerReaction(FireParticle, SproutParticle, {
+        chance: 600,
+        result1: FireParticle,
+        result2: FireParticle,
+      });
+      function applyResult(particleClass, x, y) {
+        if (typeof particleClass === "function") {
+          replaceParticle(x, y, new particleClass(x, y, grid));
+        } else if (Array.isArray(particleClass)) {
+          if (randi(1, 100) <= particleClass[1]) {
+            replaceParticle(x, y, new particleClass[0](x, y, grid));
+          } else {
+            removeParticle(x, y);
+          }
+        } else {
+          removeParticle(x, y);
+        }
+      }
       function react() {
         for (let x = 0; x < gridWidth; x++) {
           for (let y = 0; y < gridHeight; y++) {
@@ -913,46 +1222,28 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
             if (!particle1) continue;
             for (let x2 = x - 1; x2 <= x + 1; x2++) {
               for (let y2 = y - 1; y2 <= y + 1; y2++) {
+                if (x2 === x && y2 === y) continue;
                 const particle2 = getParticle(x2, y2);
-                const reactionKey = createPair(particle1, particle2);
+                // BUGFIX: a missing neighbor was given ID 1 before, so every
+                // "with empty cell" rule (key = own ID | 1) also fired against
+                // ANY real particle whose ID already contained that bit
+                // (e.g. sand+smoke pairs ignited the "Fire+empty" smoke rule).
+                // Empty-cell rules now only trigger for genuinely empty cells.
+                const isEmptyCell = !particle2;
+                const reactionKey = isEmptyCell
+                  ? createPair(particle1, null)
+                  : createPair(particle1, particle2);
                 const reaction = reactions[reactionKey];
-                if (reaction) {
-                  if (reaction && randi(1, 1000) <= reaction.chance) {
-                    if (reaction.result1) {
-                      if (typeof reaction.result1 == "function") {
-                        replaceParticle(x, y, new reaction.result1(x, y, grid));
-                      } else {
-                        if (randi(1, 100) <= reaction.result1[1]) {
-                          replaceParticle(
-                            x,
-                            y,
-                            new reaction.result1[0](x, y, grid)
-                          );
-                        } else {
-                          removeParticle(x, y);
-                        }
-                      }
-                    } else {
-                      removeParticle(x, y);
-                    }
-                    if (reaction.result2) {
-                      if (typeof reaction.result2 == "function") {
-                        replaceParticle(x, y, new reaction.result2(x, y, grid));
-                      } else {
-                        if (randi(1, 100) <= reaction.result2[1]) {
-                          replaceParticle(
-                            x,
-                            y,
-                            new reaction.result2[0](x, y, grid)
-                          );
-                        } else {
-                          removeParticle(x, y);
-                        }
-                      }
-                    } else {
-                      removeParticle(x2, y2);
-                    }
-                  }
+                if (!reaction) continue;
+                if (randi(1, 1000) > reaction.chance) continue;
+                // BUGFIX: result2 used to be applied at (x, y) – overwriting the
+                // result just placed at (x, y) by result1 – instead of at the
+                // neighbor position (x2, y2).
+                applyResult(reaction.result1, x, y);
+                if (reaction.result2 !== undefined) {
+                  applyResult(reaction.result2, x2, y2);
+                } else if (!isEmptyCell) {
+                  removeParticle(x2, y2);
                 }
               }
             }
@@ -973,6 +1264,9 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
           );
           mouse.prevX = mouse.x;
           mouse.prevY = mouse.y;
+          // BUGFIX: painting while the simulation is paused used to be invisible
+          // until the next tick; flush the buffer right after painting.
+          ctx.putImageData(imageData, 0, 0);
         }
         if (!paused && Date.now() - lastUpdate >= 1000 / updateFrequency) {
           lastUpdate = Date.now();
@@ -982,6 +1276,11 @@ EhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfmDB4MBDFFV6PIAAAAGXRFWHRDb21tZW50AENyZWF0ZWQgd
         requestAnimationFrame(gameLoop);
       }
       requestAnimationFrame(gameLoop);
+
+      // НОВЫЙ МАТЕРИАЛ "Seed" доступен сразу; подсвечиваем выбранный по умолчанию.
+      document
+        .querySelector(".materials__buttons button")
+        ?.classList.add("materials__buttons--selected");
     </script>
   </body>
 </html>
